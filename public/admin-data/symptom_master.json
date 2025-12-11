@@ -1,1 +1,29 @@
+{
+  "version": 1,
+  "updated_at": "2025-12-11T00:00:00Z",
+  "symptoms": [
+    {
+      "code": "HEADACHE",
+      "label_ja": "頭痛",
+      "category": "pain",
+      "description_ja": "頭の痛み全般を指します。部位や性質をメモに追記してください。",
+      "severity_scale": {
+        "min": 0,
+        "max": 10,
+        "step": 1
+      }
+    },
+    {
+      "code": "NAUSEA",
+      "label_ja": "吐き気",
+      "category": "digestive",
+      "description_ja": "吐き気やむかつきが続く場合は状況をメモに記録してください。",
+      "severity_scale": {
+        "min": 0,
+        "max": 10,
+        "step": 1
+      }
+    }
+  ]
+}
 
