@@ -1,0 +1,13 @@
+{
+  "expo": {
+    "name": "SCBT Local App",
+    "slug": "scbt-local-app",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "platforms": ["ios", "android", "web"],
+    "newArchEnabled": true,
+    "assetBundlePatterns": ["**/*"]
+  }
+}
+
+
