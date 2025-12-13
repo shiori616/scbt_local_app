@@ -1,5 +1,6 @@
 import React from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/RootNavigator';
@@ -12,6 +13,13 @@ export default function HomeScreen() {
 
   return (
     <View style={styles.container}>
+      <LinearGradient
+        colors={[Colors.lightBlueWash, Colors.pureWhite, Colors.softBlueGradient]}
+        locations={[0, 0.6, 1]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={StyleSheet.absoluteFill}
+      />
       <View style={styles.logoWrap}>
         <Image source={LOGO_SOURCE} style={styles.logo} resizeMode="contain" />
       </View>

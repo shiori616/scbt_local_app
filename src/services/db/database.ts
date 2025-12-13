@@ -42,10 +42,8 @@ export async function initDatabase(): Promise<void> {
 
       headache_level INTEGER NOT NULL,
       seizure_level INTEGER NOT NULL,
-      right_hand_level INTEGER NOT NULL,
-      right_leg_level INTEGER NOT NULL,
-      left_hand_level INTEGER NOT NULL,
-      left_leg_level INTEGER NOT NULL,
+      right_side_level INTEGER NOT NULL,
+      left_side_level INTEGER NOT NULL,
       speech_impairment_level INTEGER NOT NULL,
       memory_impairment_level INTEGER NOT NULL,
 
@@ -65,6 +63,16 @@ export async function initDatabase(): Promise<void> {
   const existingColumns = new Set(
     (info.rows?._array ?? []).map((r: any) => String(r.name))
   );
+  if (!existingColumns.has('right_side_level')) {
+    await executeSql(
+      `ALTER TABLE user_daily_condition_logs ADD COLUMN right_side_level INTEGER;`
+    );
+  }
+  if (!existingColumns.has('left_side_level')) {
+    await executeSql(
+      `ALTER TABLE user_daily_condition_logs ADD COLUMN left_side_level INTEGER;`
+    );
+  }
   if (!existingColumns.has('blood_pressure_systolic')) {
     await executeSql(
       `ALTER TABLE user_daily_condition_logs ADD COLUMN blood_pressure_systolic INTEGER;`
@@ -83,10 +91,8 @@ export type DailyConditionLog = {
 
   headacheLevel: number;
   seizureLevel: number;
-  rightHandLevel: number;
-  rightLegLevel: number;
-  leftHandLevel: number;
-  leftLegLevel: number;
+  rightSideLevel: number;
+  leftSideLevel: number;
   speechImpairmentLevel: number;
   memoryImpairmentLevel: number;
 
@@ -119,10 +125,8 @@ export async function saveDailyConditionLog(log: DailyConditionLog): Promise<voi
         memo = ?,
         headache_level = ?,
         seizure_level = ?,
-        right_hand_level = ?,
-        right_leg_level = ?,
-        left_hand_level = ?,
-        left_leg_level = ?,
+        right_side_level = ?,
+        left_side_level = ?,
         speech_impairment_level = ?,
         memory_impairment_level = ?,
         physical_condition = ?,
@@ -136,10 +140,8 @@ export async function saveDailyConditionLog(log: DailyConditionLog): Promise<voi
         log.memo ?? null,
         log.headacheLevel,
         log.seizureLevel,
-        log.rightHandLevel,
-        log.rightLegLevel,
-        log.leftHandLevel,
-        log.leftLegLevel,
+        log.rightSideLevel,
+        log.leftSideLevel,
         log.speechImpairmentLevel,
         log.memoryImpairmentLevel,
         log.physicalCondition,
@@ -161,10 +163,8 @@ export async function saveDailyConditionLog(log: DailyConditionLog): Promise<voi
       memo,
       headache_level,
       seizure_level,
-      right_hand_level,
-      right_leg_level,
-      left_hand_level,
-      left_leg_level,
+      right_side_level,
+      left_side_level,
       speech_impairment_level,
       memory_impairment_level,
       physical_condition,
@@ -174,17 +174,15 @@ export async function saveDailyConditionLog(log: DailyConditionLog): Promise<voi
       created_at,
       updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
     `,
     [
       log.recordedDate,
       log.memo ?? null,
       log.headacheLevel,
       log.seizureLevel,
-      log.rightHandLevel,
-      log.rightLegLevel,
-      log.leftHandLevel,
-      log.leftLegLevel,
+      log.rightSideLevel,
+      log.leftSideLevel,
       log.speechImpairmentLevel,
       log.memoryImpairmentLevel,
       log.physicalCondition,
