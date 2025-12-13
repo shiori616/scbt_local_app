@@ -1,7 +1,15 @@
-import * as SQLite from 'expo-sqlite';
+import { Platform } from 'react-native';
 
-// Open or create database
-const db = SQLite.openDatabase('app.db');
+// NOTE: Web では SQLite が未提供のため、DB 操作は no-op（必要に応じて localStorage 等に差し替え）
+// ネイティブのみ動作させるため、expo-sqlite は動的 import し、web では読み込まない。
+let nativeDb: any | null = null;
+function getNativeDb() {
+  if (nativeDb) return nativeDb;
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const SQLite = require('expo-sqlite');
+  nativeDb = SQLite.openDatabase('app.db');
+  return nativeDb;
+}
 
 type SQLResult = {
   rowsAffected: number;
@@ -15,6 +23,7 @@ type SQLResult = {
 
 function executeSql(sql: string, params: any[] = []): Promise<SQLResult> {
   return new Promise((resolve, reject) => {
+    const db = getNativeDb();
     db.transaction(
       tx => {
         tx.executeSql(
@@ -33,7 +42,11 @@ function executeSql(sql: string, params: any[] = []): Promise<SQLResult> {
 }
 
 export async function initDatabase(): Promise<void> {
-  // Create table with latest schema
+  if (Platform.OS === 'web') {
+    // Web はスキップ（必要ならここで IndexedDB/localStorage へ移行実装）
+    return;
+  }
+  // Create table with latest schema（ネイティブ）
   await executeSql(`
     CREATE TABLE IF NOT EXISTS user_daily_condition_logs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -103,7 +116,101 @@ export type DailyConditionLog = {
   bloodPressureDiastolic?: number | null;
 };
 
+export async function getDailyConditionLog(
+  recordedDate: string
+): Promise<DailyConditionLog | null> {
+  if (Platform.OS === 'web') {
+    try {
+      // eslint-disable-next-line no-undef
+      const raw = localStorage.getItem(`user_daily_condition_logs:${recordedDate}`);
+      if (!raw) return null;
+      const data = JSON.parse(raw);
+      return {
+        recordedDate,
+        memo: data.memo ?? null,
+        headacheLevel: Number(data.headacheLevel ?? data.headache_level ?? 1),
+        seizureLevel: Number(data.seizureLevel ?? data.seizure_level ?? 1),
+        rightSideLevel: Number(data.rightSideLevel ?? data.right_side_level ?? 1),
+        leftSideLevel: Number(data.leftSideLevel ?? data.left_side_level ?? 1),
+        speechImpairmentLevel: Number(
+          data.speechImpairmentLevel ?? data.speech_impairment_level ?? 1
+        ),
+        memoryImpairmentLevel: Number(
+          data.memoryImpairmentLevel ?? data.memory_impairment_level ?? 1
+        ),
+        physicalCondition: Number(data.physicalCondition ?? data.physical_condition ?? 100),
+        mentalCondition: Number(data.mentalCondition ?? data.mental_condition ?? 100),
+        bloodPressureSystolic:
+          data.bloodPressureSystolic ?? data.blood_pressure_systolic ?? null,
+        bloodPressureDiastolic:
+          data.bloodPressureDiastolic ?? data.blood_pressure_diastolic ?? null,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  await initDatabase();
+  const result = await executeSql(
+    `
+    SELECT
+      recorded_date,
+      memo,
+      headache_level,
+      seizure_level,
+      right_side_level,
+      left_side_level,
+      speech_impairment_level,
+      memory_impairment_level,
+      physical_condition,
+      mental_condition,
+      blood_pressure_systolic,
+      blood_pressure_diastolic
+    FROM user_daily_condition_logs
+    WHERE recorded_date = ?
+    LIMIT 1;
+    `,
+    [recordedDate]
+  );
+  if (result.rows.length === 0) return null;
+  const row = result.rows.item(0);
+  return {
+    recordedDate,
+    memo: row.memo ?? null,
+    headacheLevel: Number(row.headache_level ?? 1),
+    seizureLevel: Number(row.seizure_level ?? 1),
+    rightSideLevel: Number(row.right_side_level ?? 1),
+    leftSideLevel: Number(row.left_side_level ?? 1),
+    speechImpairmentLevel: Number(row.speech_impairment_level ?? 1),
+    memoryImpairmentLevel: Number(row.memory_impairment_level ?? 1),
+    physicalCondition: Number(row.physical_condition ?? 100),
+    mentalCondition: Number(row.mental_condition ?? 100),
+    bloodPressureSystolic:
+      row.blood_pressure_systolic != null ? Number(row.blood_pressure_systolic) : null,
+    bloodPressureDiastolic:
+      row.blood_pressure_diastolic != null ? Number(row.blood_pressure_diastolic) : null,
+  };
+}
+
 export async function saveDailyConditionLog(log: DailyConditionLog): Promise<void> {
+  // Web では localStorage に保存する簡易フォールバック
+  if (Platform.OS === 'web') {
+    const nowIso = new Date().toISOString();
+    const key = `user_daily_condition_logs:${log.recordedDate}`;
+    const payload = {
+      ...log,
+      created_at: nowIso,
+      updated_at: nowIso,
+    };
+    try {
+      // eslint-disable-next-line no-undef
+      localStorage.setItem(key, JSON.stringify(payload));
+    } catch {
+      // ignore
+    }
+    return;
+  }
+
   await initDatabase();
 
   const nowIso = new Date().toISOString();
