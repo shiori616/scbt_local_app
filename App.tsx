@@ -4,6 +4,8 @@ import { StatusBar } from 'expo-status-bar';
 import { ADMIN_DATA_ENDPOINTS } from './src/config/adminData';
 import { NavigationContainer } from '@react-navigation/native';
 import RootNavigator from './src/navigation/RootNavigator';
+import { NavigationTheme } from './src/theme/navigationTheme';
+import { Colors } from './src/theme/colors';
 
 export default function App() {
   const [isLoading, setIsLoading] = useState(true);
@@ -43,8 +45,8 @@ export default function App() {
 
   return (
     <View style={styles.container}>
-      <StatusBar style="auto" />
-      <NavigationContainer>
+      <StatusBar style="light" />
+      <NavigationContainer theme={NavigationTheme}>
         <RootNavigator />
       </NavigationContainer>
     </View>
@@ -54,7 +56,7 @@ export default function App() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#ffffff',
+    backgroundColor: Colors.lightBlueWash,
   },
 });
 

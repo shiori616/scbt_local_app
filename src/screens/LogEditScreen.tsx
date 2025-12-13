@@ -1,5 +1,6 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import { Colors } from '../theme/colors';
 
 export default function LogEditScreen() {
   return (
@@ -14,11 +15,12 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#ffffff',
+    backgroundColor: Colors.lightBlueWash,
   },
   title: {
     fontSize: 20,
     fontWeight: '600',
+    color: Colors.deepInkBrown,
   },
 });
 
