@@ -1,42 +1,33 @@
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import LogCreateScreen from '../screens/LogCreateScreen';
 import LogListScreen from '../screens/LogListScreen';
 import LogEditScreen from '../screens/LogEditScreen';
 import { Colors } from '../theme/colors';
-import HomeScreen from '../screens/HomeScreen';
-import LogCreateScreen from '../screens/LogCreateScreen';
-import TabNavigator from './TabNavigator';
 
-export type RootStackParamList = {
-  Tabs: undefined;
+export type SeizureStackParamList = {
   LogCreate: undefined;
   LogList: undefined;
   LogEdit: undefined;
 };
 
-const Stack = createNativeStackNavigator<RootStackParamList>();
+const Stack = createNativeStackNavigator<SeizureStackParamList>();
 
-export default function RootNavigator() {
+export default function SeizureStackNavigator() {
   return (
     <Stack.Navigator
-      initialRouteName="Tabs"
+      initialRouteName="LogCreate"
       screenOptions={{
         headerStyle: { backgroundColor: Colors.deepNeuroBlue },
         headerTintColor: Colors.pureWhite,
         headerTitleStyle: { color: Colors.pureWhite },
       }}
     >
-      <Stack.Screen
-        name="Tabs"
-        component={TabNavigator}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen name="LogList" component={LogListScreen} options={{ title: 'Log List' }} />
       <Stack.Screen name="LogCreate" component={LogCreateScreen} options={{ title: '記録作成' }} />
+      <Stack.Screen name="LogList" component={LogListScreen} options={{ title: 'Log List' }} />
       <Stack.Screen name="LogEdit" component={LogEditScreen} options={{ title: 'Log Edit' }} />
     </Stack.Navigator>
   );
 }
-
 
 

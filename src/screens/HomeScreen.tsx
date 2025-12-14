@@ -35,13 +35,13 @@ export default function HomeScreen() {
       <View style={styles.buttons}>
         <Pressable
           style={({ pressed }) => [styles.primaryBtn, pressed && styles.pressed]}
-          onPress={() => navigation.navigate('LogCreate')}
+          onPress={() => (navigation as any).navigate('SeizureLog')}
         >
           <Text style={styles.primaryText}>記録</Text>
         </Pressable>
         <Pressable
           style={({ pressed }) => [styles.secondaryBtn, pressed && styles.pressed]}
-          onPress={() => navigation.navigate('LogList')}
+          onPress={() => (navigation as any).navigate('Report')}
         >
           <Text style={styles.secondaryText}>レポート</Text>
         </Pressable>
