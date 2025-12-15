@@ -128,15 +128,15 @@ export async function getDailyConditionLog(
       return {
         recordedDate,
         memo: data.memo ?? null,
-        headacheLevel: Number(data.headacheLevel ?? data.headache_level ?? 1),
-        seizureLevel: Number(data.seizureLevel ?? data.seizure_level ?? 1),
-        rightSideLevel: Number(data.rightSideLevel ?? data.right_side_level ?? 1),
-        leftSideLevel: Number(data.leftSideLevel ?? data.left_side_level ?? 1),
+        headacheLevel: Number(data.headacheLevel ?? data.headache_level ?? 5),
+        seizureLevel: Number(data.seizureLevel ?? data.seizure_level ?? 5),
+        rightSideLevel: Number(data.rightSideLevel ?? data.right_side_level ?? 5),
+        leftSideLevel: Number(data.leftSideLevel ?? data.left_side_level ?? 5),
         speechImpairmentLevel: Number(
-          data.speechImpairmentLevel ?? data.speech_impairment_level ?? 1
+          data.speechImpairmentLevel ?? data.speech_impairment_level ?? 5
         ),
         memoryImpairmentLevel: Number(
-          data.memoryImpairmentLevel ?? data.memory_impairment_level ?? 1
+          data.memoryImpairmentLevel ?? data.memory_impairment_level ?? 5
         ),
         physicalCondition: Number(data.physicalCondition ?? data.physical_condition ?? 100),
         mentalCondition: Number(data.mentalCondition ?? data.mental_condition ?? 100),
@@ -177,12 +177,12 @@ export async function getDailyConditionLog(
   return {
     recordedDate,
     memo: row.memo ?? null,
-    headacheLevel: Number(row.headache_level ?? 1),
-    seizureLevel: Number(row.seizure_level ?? 1),
-    rightSideLevel: Number(row.right_side_level ?? 1),
-    leftSideLevel: Number(row.left_side_level ?? 1),
-    speechImpairmentLevel: Number(row.speech_impairment_level ?? 1),
-    memoryImpairmentLevel: Number(row.memory_impairment_level ?? 1),
+    headacheLevel: Number(row.headache_level ?? 5),
+    seizureLevel: Number(row.seizure_level ?? 5),
+    rightSideLevel: Number(row.right_side_level ?? 5),
+    leftSideLevel: Number(row.left_side_level ?? 5),
+    speechImpairmentLevel: Number(row.speech_impairment_level ?? 5),
+    memoryImpairmentLevel: Number(row.memory_impairment_level ?? 5),
     physicalCondition: Number(row.physical_condition ?? 100),
     mentalCondition: Number(row.mental_condition ?? 100),
     bloodPressureSystolic:
