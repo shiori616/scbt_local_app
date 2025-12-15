@@ -79,6 +79,19 @@ const LEVEL_COLORS: Record<number, string> = {
   5: Colors.deepNeuroBlue // 濃い青
 };
 
+// 0-200の値に応じた色を返す関数（4段階スケール）
+function getBarColorForValue(value: number): string {
+  if (value <= 50) return LEVEL_COLORS[1];      // 0-50: 赤
+  if (value <= 99) return LEVEL_COLORS[2];      // 51-99: 薄い赤
+  if (value <= 150) return LEVEL_COLORS[4];     // 100-150: 薄い青
+  return LEVEL_COLORS[5];                        // 151-200: 濃い青
+}
+
+// すべて白文字
+function getBubbleTextColor(value: number): string {
+  return Colors.pureWhite;
+}
+
 type StatusKind = 'poor' | 'caution' | 'good';
 
 function computeStatusKindFromLog(log: any): StatusKind {
@@ -511,6 +524,8 @@ function BarWithBubble({ value }: { value: number }) {
 function BarWithBubbleInline({ value }: { value: number }) {
   const [barWidth, setBarWidth] = useState(0);
   const percentage = Math.max(0, Math.min(200, value)) / 2;
+  const barColor = getBarColorForValue(value);
+  const textColor = getBubbleTextColor(value);
   
   // バブルの位置を計算（枠をはみ出さないように制限）
   const bubbleWidth = 40; // minWidth
@@ -521,15 +536,15 @@ function BarWithBubbleInline({ value }: { value: number }) {
   return (
     <View style={styles.barInlineContainer}>
       {barWidth > 0 && (
-        <View style={[styles.barInlineBubble, { left: clampedPosition, transform: [{ translateX: -bubbleHalf }] }]}>
-          <Text style={styles.barInlineBubbleText}>{value}</Text>
+        <View style={[styles.barInlineBubble, { left: clampedPosition, transform: [{ translateX: -bubbleHalf }], backgroundColor: barColor }]}>
+          <Text style={[styles.barInlineBubbleText, { color: textColor }]}>{value}</Text>
         </View>
       )}
       <View 
         style={styles.barInlineWrap}
         onLayout={(e) => setBarWidth(e.nativeEvent.layout.width)}
       >
-        <View style={[styles.barFill, { width: `${percentage}%` }]} />
+        <View style={[styles.barFill, { width: `${percentage}%`, backgroundColor: barColor }]} />
       </View>
     </View>
   );
@@ -840,7 +855,7 @@ const styles = StyleSheet.create({
     width: '100%',
     height: 10,
     borderRadius: 6,
-    backgroundColor: '#C5D3E8',
+    backgroundColor: '#DDE3EE',
     overflow: 'hidden',
   },
   bloodPressureRow: {
@@ -887,7 +902,7 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 10,
     borderRadius: 6,
-    backgroundColor: '#C5D3E8',
+    backgroundColor: '#DDE3EE',
     overflow: 'hidden',
   },
   barFill: {

@@ -12,6 +12,19 @@ const LEVEL_COLORS: Record<number, string> = {
   5: Colors.deepNeuroBlue // 濃い青
 };
 
+// 0-200の値に応じた色を返す関数（4段階スケール）
+function getBarColorForValue(value: number): string {
+  if (value <= 50) return LEVEL_COLORS[1];      // 0-50: 赤
+  if (value <= 99) return LEVEL_COLORS[2];      // 51-99: 薄い赤
+  if (value <= 150) return LEVEL_COLORS[4];     // 100-150: 薄い青
+  return LEVEL_COLORS[5];                        // 151-200: 濃い青
+}
+
+// すべて白文字
+function getBubbleTextColor(value: number): string {
+  return Colors.pureWhite;
+}
+
 function formatJpDate(date: Date): string {
   const w = ['日曜日', '月曜日', '火曜日', '水曜日', '木曜日', '金曜日', '土曜日'][date.getDay()];
   return `${date.getFullYear()}年${String(date.getMonth() + 1).padStart(2, '0')}月${String(
@@ -97,12 +110,14 @@ function BarSlider({
   const percentage = ((value - min) / (max - min)) * 100;
   const thumbPosition = (barWidth * (value - min)) / (max - min) - 12; // 12 = thumb半径
   const bubblePosition = Math.max(0, thumbPosition);
+  const barColor = getBarColorForValue(value);
+  const textColor = getBubbleTextColor(value);
   
   return (
     <View style={styles.barSliderContainer}>
       {/* 数値バブル（つまみの上に表示） */}
-      <View style={[styles.barSliderBubble, { left: bubblePosition }]}>
-        <Text style={styles.barSliderBubbleText}>{value}</Text>
+      <View style={[styles.barSliderBubble, { left: bubblePosition, backgroundColor: barColor }]}>
+        <Text style={[styles.barSliderBubbleText, { color: textColor }]}>{value}</Text>
       </View>
       <View
         ref={barRef}
@@ -110,8 +125,8 @@ function BarSlider({
         onLayout={(e) => setBarWidth(e.nativeEvent.layout.width)}
         {...panResponder.panHandlers}
       >
-        <View style={[styles.barSliderFill, { width: `${percentage}%` }]} />
-        <View style={[styles.barSliderThumb, { left: Math.max(0, thumbPosition) }]} />
+        <View style={[styles.barSliderFill, { width: `${percentage}%`, backgroundColor: barColor }]} />
+        <View style={[styles.barSliderThumb, { left: Math.max(0, thumbPosition), backgroundColor: barColor }]} />
       </View>
     </View>
   );
@@ -766,7 +781,7 @@ const styles = StyleSheet.create({
   barSliderTrack: {
     height: 12,
     borderRadius: 6,
-    backgroundColor: '#C5D3E8',
+    backgroundColor: '#DDE3EE',
     overflow: 'visible',
     position: 'relative',
   },
