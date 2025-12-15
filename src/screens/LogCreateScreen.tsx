@@ -106,6 +106,8 @@ export default function LogCreateScreen() {
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 保留中の変更があるかどうか
   const hasPendingChangesRef = useRef(false);
+  // 現在保存中かどうか（重複保存防止）
+  const isSavingRef = useRef(false);
   // アンマウント時に保存するための現在のフォーム値
   const formDataRef = useRef({
     memo: '',
@@ -156,8 +158,8 @@ export default function LogCreateScreen() {
       if (autoSaveTimerRef.current) {
         clearTimeout(autoSaveTimerRef.current);
       }
-      // 保留中の変更があれば即座に保存
-      if (hasPendingChangesRef.current) {
+      // 保留中の変更があり、かつ現在保存中でなければ即座に保存
+      if (hasPendingChangesRef.current && !isSavingRef.current) {
         console.log('[LogCreateScreen] Flushing pending changes on unmount');
         const data = formDataRef.current;
         const targetDate = currentRecordedDateRef.current;
@@ -232,6 +234,7 @@ export default function LogCreateScreen() {
         return;
       }
       console.log('[LogCreateScreen] Executing auto-save for date:', targetDate);
+      isSavingRef.current = true;
       try {
         await doSave(targetDate, {
           memo,
@@ -247,8 +250,10 @@ export default function LogCreateScreen() {
           bpDia,
         });
         hasPendingChangesRef.current = false;
+        isSavingRef.current = false;
       } catch (err) {
         console.error('[LogCreateScreen] Auto-save error:', err);
+        isSavingRef.current = false;
       }
     }, 400);
     // eslint-disable-next-line react-hooks/exhaustive-deps
