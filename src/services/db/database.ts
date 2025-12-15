@@ -262,6 +262,158 @@ export async function getDailyConditionLog(
   };
 }
 
+/**
+ * 日付範囲を指定して一括でログを取得する（カレンダー表示用）
+ * @param startDate 開始日 (YYYY-MM-DD)
+ * @param endDate 終了日 (YYYY-MM-DD)
+ * @returns 日付をキーとしたログのマップ
+ */
+export async function getDailyConditionLogsInRange(
+  startDate: string,
+  endDate: string
+): Promise<Map<string, DailyConditionLog>> {
+  const result = new Map<string, DailyConditionLog>();
+
+  if (Platform.OS === 'web') {
+    // Web版: localStorageから範囲内のデータを取得
+    try {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      const oneDayMs = 24 * 60 * 60 * 1000;
+      
+      for (let t = start.getTime(); t <= end.getTime(); t += oneDayMs) {
+        const d = new Date(t);
+        const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        // eslint-disable-next-line no-undef
+        const raw = localStorage.getItem(`user_daily_condition_logs:${iso}`);
+        if (raw) {
+          const data = JSON.parse(raw);
+          result.set(iso, {
+            recordedDate: iso,
+            memo: data.memo ?? null,
+            headacheLevel: Number(data.headacheLevel ?? data.headache_level ?? 5),
+            seizureLevel: Number(data.seizureLevel ?? data.seizure_level ?? 5),
+            rightSideLevel: Number(data.rightSideLevel ?? data.right_side_level ?? 5),
+            leftSideLevel: Number(data.leftSideLevel ?? data.left_side_level ?? 5),
+            speechImpairmentLevel: Number(
+              data.speechImpairmentLevel ?? data.speech_impairment_level ?? 5
+            ),
+            memoryImpairmentLevel: Number(
+              data.memoryImpairmentLevel ?? data.memory_impairment_level ?? 5
+            ),
+            physicalCondition: Number(data.physicalCondition ?? data.physical_condition ?? 100),
+            mentalCondition: Number(data.mentalCondition ?? data.mental_condition ?? 100),
+            bloodPressureSystolic:
+              data.bloodPressureSystolic ?? data.blood_pressure_systolic ?? null,
+            bloodPressureDiastolic:
+              data.bloodPressureDiastolic ?? data.blood_pressure_diastolic ?? null,
+          });
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return result;
+  }
+
+  await initDatabase();
+  const database = getDb();
+  if (!database) {
+    console.warn('[getDailyConditionLogsInRange] Database not available');
+    return result;
+  }
+
+  try {
+    console.log('[getDailyConditionLogsInRange] Querying range:', startDate, 'to', endDate);
+    
+    let rows: any[] = [];
+    
+    if (typeof database.getAllSync === 'function') {
+      console.log('[getDailyConditionLogsInRange] Using getAllSync');
+      rows = database.getAllSync(
+        `
+        SELECT
+          recorded_date,
+          memo,
+          headache_level,
+          seizure_level,
+          right_side_level,
+          left_side_level,
+          speech_impairment_level,
+          memory_impairment_level,
+          physical_condition,
+          mental_condition,
+          blood_pressure_systolic,
+          blood_pressure_diastolic
+        FROM user_daily_condition_logs
+        WHERE recorded_date >= ? AND recorded_date <= ?
+        ORDER BY recorded_date;
+        `,
+        [startDate, endDate]
+      );
+    } else if (typeof database.prepareSync === 'function') {
+      console.log('[getDailyConditionLogsInRange] Using prepareSync/executeSync');
+      const stmt = database.prepareSync(
+        `
+        SELECT
+          recorded_date,
+          memo,
+          headache_level,
+          seizure_level,
+          right_side_level,
+          left_side_level,
+          speech_impairment_level,
+          memory_impairment_level,
+          physical_condition,
+          mental_condition,
+          blood_pressure_systolic,
+          blood_pressure_diastolic
+        FROM user_daily_condition_logs
+        WHERE recorded_date >= ? AND recorded_date <= ?
+        ORDER BY recorded_date;
+        `
+      );
+      stmt.bindSync([startDate, endDate]);
+      const queryResult = stmt.executeSync();
+      
+      if (queryResult) {
+        if (Array.isArray(queryResult)) {
+          rows = queryResult;
+        } else if (queryResult.getAll && typeof queryResult.getAll === 'function') {
+          rows = queryResult.getAll();
+        }
+      }
+      stmt.finalizeSync();
+    }
+
+    console.log('[getDailyConditionLogsInRange] Found', rows.length, 'rows');
+
+    for (const row of rows) {
+      const recordedDate = row.recorded_date;
+      result.set(recordedDate, {
+        recordedDate,
+        memo: row.memo ?? null,
+        headacheLevel: Number(row.headache_level ?? 5),
+        seizureLevel: Number(row.seizure_level ?? 5),
+        rightSideLevel: Number(row.right_side_level ?? 5),
+        leftSideLevel: Number(row.left_side_level ?? 5),
+        speechImpairmentLevel: Number(row.speech_impairment_level ?? 5),
+        memoryImpairmentLevel: Number(row.memory_impairment_level ?? 5),
+        physicalCondition: Number(row.physical_condition ?? 100),
+        mentalCondition: Number(row.mental_condition ?? 100),
+        bloodPressureSystolic:
+          row.blood_pressure_systolic != null ? Number(row.blood_pressure_systolic) : null,
+        bloodPressureDiastolic:
+          row.blood_pressure_diastolic != null ? Number(row.blood_pressure_diastolic) : null,
+      });
+    }
+  } catch (error) {
+    console.error('[getDailyConditionLogsInRange] Error:', error);
+  }
+
+  return result;
+}
+
 export async function saveDailyConditionLog(log: DailyConditionLog): Promise<void> {
   // Web では localStorage に保存する簡易フォールバック
   if (Platform.OS === 'web') {

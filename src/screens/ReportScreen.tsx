@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Colors } from '../theme/colors';
-import { getDailyConditionLog, ensureDefaultLogsForPastYear } from '../services/db/database';
+import { getDailyConditionLog, getDailyConditionLogsInRange, ensureDefaultLogsForPastYear } from '../services/db/database';
 import { useFocusEffect } from '@react-navigation/native';
 
 type DayCell = {
@@ -126,12 +126,21 @@ export default function ReportScreen() {
   }, []);
 
   // 月のグリッドに含まれる全日付のドット色（データ有無）を事前取得
+  // 一括取得で DB 呼び出しを 42 回 → 1 回に削減
   const loadMonthDots = async () => {
     const cells = buildMonthGrid(month);
     const entries: Record<string, string | null> = {};
+    
+    // グリッドの開始日と終了日を取得
+    const startDate = toIsoDate(cells[0].date);
+    const endDate = toIsoDate(cells[cells.length - 1].date);
+    
+    // 範囲内のログを一括取得（1回のDBクエリ）
+    const logsMap = await getDailyConditionLogsInRange(startDate, endDate);
+    
     for (const c of cells) {
       const iso = toIsoDate(c.date);
-      const log = await getDailyConditionLog(iso);
+      const log = logsMap.get(iso);
       if (!log) {
         entries[iso] = null;
         continue;
@@ -155,12 +164,20 @@ export default function ReportScreen() {
     }, [selected, month])
   );
 
+  // 週次ログも一括取得で DB 呼び出しを 7 回 → 1 回に削減
   useEffect(() => {
     (async () => {
+      const startDate = toIsoDate(weekStart);
+      const endDate = toIsoDate(addDays(weekStart, 6));
+      
+      // 範囲内のログを一括取得（1回のDBクエリ）
+      const logsMap = await getDailyConditionLogsInRange(startDate, endDate);
+      
       const arr: Array<{ date: Date; log: any | null }> = [];
       for (let i = 0; i < 7; i++) {
         const d = addDays(weekStart, i);
-        const log = await getDailyConditionLog(toIsoDate(d));
+        const iso = toIsoDate(d);
+        const log = logsMap.get(iso) ?? null;
         arr.push({ date: d, log });
       }
       setWeekLogs(arr);
