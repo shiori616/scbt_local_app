@@ -384,64 +384,67 @@ function DailyReportCard({
       {log ? (
         <>
           {/* 症状セクション - 表形式（1行3項目） */}
-          <Text style={styles.sectionTitle}>症状</Text>
           <View style={styles.symptomTable}>
             <View style={styles.symptomRow}>
               <View style={styles.symptomCell}>
-                <Text style={styles.symptomLabel} numberOfLines={1}>頭痛</Text>
+                <Text style={styles.symptomLabelBold} numberOfLines={1}>頭痛</Text>
                 <Badge value={log.headacheLevel} />
               </View>
               <View style={styles.symptomCell}>
-                <Text style={styles.symptomLabel} numberOfLines={1}>てんかん</Text>
+                <Text style={styles.symptomLabelBold} numberOfLines={1}>てんかん</Text>
                 <Badge value={log.seizureLevel} />
               </View>
               <View style={styles.symptomCell}>
-                <Text style={styles.symptomLabel} numberOfLines={1}>右半身</Text>
+                <Text style={styles.symptomLabelBold} numberOfLines={1}>右半身</Text>
                 <Badge value={log.rightSideLevel} />
               </View>
             </View>
             <View style={styles.symptomRow}>
               <View style={styles.symptomCell}>
-                <Text style={styles.symptomLabel} numberOfLines={1}>左半身</Text>
+                <Text style={styles.symptomLabelBold} numberOfLines={1}>左半身</Text>
                 <Badge value={log.leftSideLevel} />
               </View>
               <View style={styles.symptomCell}>
-                <Text style={styles.symptomLabel} numberOfLines={1}>言語</Text>
+                <Text style={styles.symptomLabelBold} numberOfLines={1}>言語</Text>
                 <Badge value={log.speechImpairmentLevel} />
               </View>
               <View style={styles.symptomCell}>
-                <Text style={styles.symptomLabel} numberOfLines={1}>記憶</Text>
+                <Text style={styles.symptomLabelBold} numberOfLines={1}>記憶</Text>
                 <Badge value={log.memoryImpairmentLevel} />
               </View>
             </View>
           </View>
 
-          {/* 体調・気持ちセクション（横並び） */}
-          <View style={styles.conditionRow}>
-            <View style={styles.conditionItem}>
-              <Text style={styles.conditionLabel}>体調</Text>
-              <Text style={styles.conditionValue}>{log.physicalCondition}</Text>
-              <Bar value={log.physicalCondition} />
+          {/* 体調・気持ちセクション（縦並び、ラベルとバーを横に） */}
+          <View style={styles.conditionSection}>
+            <View style={styles.conditionRowHorizontal}>
+              <Text style={styles.conditionLabelInline}>体調</Text>
+              <BarWithBubbleInline value={log.physicalCondition} />
             </View>
-            <View style={styles.conditionItem}>
-              <Text style={styles.conditionLabel}>気持ち</Text>
-              <Text style={styles.conditionValue}>{log.mentalCondition}</Text>
-              <Bar value={log.mentalCondition} />
+            <View style={styles.conditionRowHorizontal}>
+              <Text style={styles.conditionLabelInline}>気持ち</Text>
+              <BarWithBubbleInline value={log.mentalCondition} />
             </View>
           </View>
 
           {/* 血圧セクション */}
-          <Text style={styles.sectionTitle}>血圧</Text>
-          <View style={styles.bloodPressureRow}>
-            <Text style={styles.bpLabel}>最低</Text>
-            <Text style={styles.bpValue}>{log.bloodPressureDiastolic ?? '-'}</Text>
-            <Text style={styles.bpLabel}>最高</Text>
-            <Text style={styles.bpValue}>{log.bloodPressureSystolic ?? '-'}</Text>
+          <View style={styles.infoRowHorizontal}>
+            <Text style={styles.infoLabelInline}>血圧</Text>
+            <Text style={styles.infoValueInline}>
+              {log.bloodPressureSystolic != null && log.bloodPressureDiastolic != null
+                ? `${log.bloodPressureSystolic} / ${log.bloodPressureDiastolic} mmHg`
+                : log.bloodPressureSystolic != null
+                ? `${log.bloodPressureSystolic} / - mmHg`
+                : log.bloodPressureDiastolic != null
+                ? `- / ${log.bloodPressureDiastolic} mmHg`
+                : '-'}
+            </Text>
           </View>
 
           {log.memo ? (
-            <View style={styles.memoBox}>
-              <Text style={styles.memoText}>{log.memo}</Text>
+            <View style={styles.infoRowHorizontal}>
+              <Text style={styles.infoLabelInline}>メモ</Text>
+              <Text style={styles.infoValueInline}>{log.memo}</Text>
             </View>
           ) : null}
         </>
@@ -471,6 +474,34 @@ function Bar({ value }: { value: number }) {
   return (
     <View style={styles.barWrap}>
       <View style={[styles.barFill, { width: `${Math.max(0, Math.min(200, value)) / 2}%` }]} />
+    </View>
+  );
+}
+
+function BarWithBubble({ value }: { value: number }) {
+  const percentage = Math.max(0, Math.min(200, value)) / 2;
+  return (
+    <View style={styles.barWithBubbleContainer}>
+      <View style={[styles.barBubble, { left: `${percentage}%` }]}>
+        <Text style={styles.barBubbleText}>{value}</Text>
+      </View>
+      <View style={styles.barWrap}>
+        <View style={[styles.barFill, { width: `${percentage}%` }]} />
+      </View>
+    </View>
+  );
+}
+
+function BarWithBubbleInline({ value }: { value: number }) {
+  const percentage = Math.max(0, Math.min(200, value)) / 2;
+  return (
+    <View style={styles.barInlineContainer}>
+      <View style={[styles.barInlineBubble, { left: `${percentage}%` }]}>
+        <Text style={styles.barInlineBubbleText}>{value}</Text>
+      </View>
+      <View style={styles.barInlineWrap}>
+        <View style={[styles.barFill, { width: `${percentage}%` }]} />
+      </View>
     </View>
   );
 }
@@ -637,19 +668,92 @@ const styles = StyleSheet.create({
     width: 64,
     textAlign: 'left',
   },
+  symptomLabelBold: {
+    color: Colors.deepInkBrown,
+    fontSize: 14,
+    fontWeight: '700',
+    width: 64,
+    textAlign: 'left',
+  },
   conditionRow: {
     flexDirection: 'row',
-    marginTop: 16,
+    marginTop: 4,
     marginBottom: 16,
     gap: 16,
   },
   conditionItem: {
     flex: 1,
   },
+  conditionSection: {
+    marginTop: 8,
+    marginBottom: 8,
+    paddingBottom: 4,
+  },
+  conditionRowHorizontal: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    marginBottom: 16,
+  },
+  conditionLabelInline: {
+    color: Colors.deepInkBrown,
+    fontSize: 14,
+    fontWeight: '700',
+    width: 50,
+    marginRight: 12,
+    marginBottom: -2,
+  },
+  infoRowHorizontal: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  infoLabelInline: {
+    color: Colors.deepInkBrown,
+    fontSize: 14,
+    fontWeight: '700',
+    width: 50,
+    marginRight: 12,
+  },
+  infoValueInline: {
+    color: Colors.deepInkBrown,
+    fontSize: 14,
+    fontWeight: '400',
+    flex: 1,
+  },
+  conditionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
   conditionLabel: {
     color: Colors.deepInkBrown,
     fontSize: 14,
     marginBottom: 4,
+  },
+  conditionLabelBold: {
+    color: Colors.deepInkBrown,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  conditionBubble: {
+    backgroundColor: Colors.deepNeuroBlue,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+    minWidth: 40,
+    alignItems: 'center',
+  },
+  conditionLabelTop: {
+    color: Colors.deepInkBrown,
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  conditionBubbleText: {
+    color: Colors.pureWhite,
+    fontSize: 14,
+    fontWeight: '700',
   },
   conditionValue: {
     color: Colors.deepInkBrown,
@@ -657,6 +761,55 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'right',
     marginBottom: 4,
+  },
+  barWithBubbleContainer: {
+    position: 'relative',
+    marginTop: 28,
+    paddingTop: 8,
+  },
+  barBubble: {
+    position: 'absolute',
+    top: -28,
+    transform: [{ translateX: -20 }],
+    backgroundColor: Colors.deepNeuroBlue,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+    minWidth: 40,
+    alignItems: 'center',
+  },
+  barBubbleText: {
+    color: Colors.pureWhite,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  barInlineContainer: {
+    flex: 1,
+    position: 'relative',
+    paddingTop: 36,
+  },
+  barInlineBubble: {
+    position: 'absolute',
+    top: 0,
+    transform: [{ translateX: -20 }],
+    backgroundColor: Colors.deepNeuroBlue,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+    minWidth: 40,
+    alignItems: 'center',
+  },
+  barInlineBubbleText: {
+    color: Colors.pureWhite,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  barInlineWrap: {
+    width: '100%',
+    height: 10,
+    borderRadius: 6,
+    backgroundColor: '#C5D3E8',
+    overflow: 'hidden',
   },
   bloodPressureRow: {
     flexDirection: 'row',
@@ -668,11 +821,23 @@ const styles = StyleSheet.create({
     color: Colors.deepInkBrown,
     fontSize: 14,
   },
+  bpLabelBold: {
+    color: Colors.deepInkBrown,
+    fontSize: 14,
+    fontWeight: '700',
+  },
   bpValue: {
     color: Colors.deepInkBrown,
     fontWeight: '600',
     fontSize: 16,
     marginRight: 16,
+  },
+  bpValueCombined: {
+    color: Colors.deepInkBrown,
+    fontWeight: '400',
+    fontSize: 18,
+    marginTop: 4,
+    marginBottom: 12,
   },
   badge: {
     width: 36,
