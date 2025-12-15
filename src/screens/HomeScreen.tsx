@@ -2,14 +2,14 @@ import React from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import type { RootStackParamList } from '../navigation/RootNavigator';
+import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
+import type { TabParamList } from '../navigation/TabNavigator';
 import { Colors } from '../theme/colors';
 
 const LOGO_SOURCE = require('../../assets/logo.png');
 
 export default function HomeScreen() {
-  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const navigation = useNavigation<BottomTabNavigationProp<TabParamList>>();
 
   return (
     <View style={styles.container}>
@@ -35,13 +35,13 @@ export default function HomeScreen() {
       <View style={styles.buttons}>
         <Pressable
           style={({ pressed }) => [styles.primaryBtn, pressed && styles.pressed]}
-          onPress={() => (navigation as any).navigate('SeizureLog')}
+          onPress={() => navigation.navigate('SeizureLog')}
         >
           <Text style={styles.primaryText}>記録</Text>
         </Pressable>
         <Pressable
           style={({ pressed }) => [styles.secondaryBtn, pressed && styles.pressed]}
-          onPress={() => (navigation as any).navigate('Report')}
+          onPress={() => navigation.navigate('Report')}
         >
           <Text style={styles.secondaryText}>レポート</Text>
         </Pressable>

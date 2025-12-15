@@ -23,7 +23,11 @@ export default function SeizureStackNavigator() {
         headerTitleStyle: { color: Colors.pureWhite },
       }}
     >
-      <Stack.Screen name="LogCreate" component={LogCreateScreen} options={{ title: '記録作成' }} />
+      <Stack.Screen
+        name="LogCreate"
+        component={LogCreateScreen}
+        options={{ title: '記録' }}
+      />
       <Stack.Screen name="LogList" component={LogListScreen} options={{ title: 'Log List' }} />
       <Stack.Screen name="LogEdit" component={LogEditScreen} options={{ title: 'Log Edit' }} />
     </Stack.Navigator>

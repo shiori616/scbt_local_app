@@ -3,7 +3,7 @@ import { Text } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import HomeScreen from '../screens/HomeScreen';
 import SeizureStackNavigator from './SeizureStackNavigator';
-import ReportScreen from '../screens/ReportScreen';
+import ReportStackNavigator from './ReportStackNavigator';
 import MyPageScreen from '../screens/MyPageScreen';
 import { Colors } from '../theme/colors';
 import { Ionicons, MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
@@ -51,7 +51,7 @@ export default function TabNavigator() {
         name="SeizureLog"
         component={SeizureStackNavigator}
         options={{
-          tabBarLabel: '発作記録',
+          tabBarLabel: '記録',
           tabBarIcon: ({ color, size }) => (
             <MaterialIcons name="flare" color={color} size={size ?? 22} />
           ),
@@ -59,7 +59,7 @@ export default function TabNavigator() {
       />
       <Tab.Screen
         name="Report"
-        component={ReportScreen}
+        component={ReportStackNavigator}
         options={{
           tabBarLabel: 'レポート',
           tabBarIcon: ({ color, size }) => (

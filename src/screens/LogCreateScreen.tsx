@@ -80,17 +80,17 @@ export default function LogCreateScreen() {
     return Math.max(0, Math.min(usable, usable * ratio));
   };
 
-  const [headache, setHeadache] = useState(1);
-  const [seizure, setSeizure] = useState(1);
-  const [rightSide, setRightSide] = useState(1);
-  const [leftSide, setLeftSide] = useState(1);
-  const [speech, setSpeech] = useState(1);
-  const [memory, setMemory] = useState(1);
+  const [headache, setHeadache] = useState(5);
+  const [seizure, setSeizure] = useState(5);
+  const [rightSide, setRightSide] = useState(5);
+  const [leftSide, setLeftSide] = useState(5);
+  const [speech, setSpeech] = useState(5);
+  const [memory, setMemory] = useState(5);
 
   const [physical, setPhysical] = useState<number>(100);
   const [mental, setMental] = useState<number>(100);
-  const [bpSys, setBpSys] = useState<string>('120');
-  const [bpDia, setBpDia] = useState<string>('80');
+  const [bpSys, setBpSys] = useState<string>('');
+  const [bpDia, setBpDia] = useState<string>('');
   const [memo, setMemo] = useState<string>('');
 
   // 日付変更時にデータを読み込み
@@ -98,17 +98,17 @@ export default function LogCreateScreen() {
     (async () => {
       const loaded = await getDailyConditionLog(recordedDate);
       if (!loaded) {
-        // デフォルトにリセット
-        setHeadache(1);
-        setSeizure(1);
-        setRightSide(1);
-        setLeftSide(1);
-        setSpeech(1);
-        setMemory(1);
+        // デフォルトにリセット（5段階=5、200段階=100、血圧は空欄）
+        setHeadache(5);
+        setSeizure(5);
+        setRightSide(5);
+        setLeftSide(5);
+        setSpeech(5);
+        setMemory(5);
         setPhysical(100);
         setMental(100);
-        setBpSys('120');
-        setBpDia('80');
+        setBpSys('');
+        setBpDia('');
         setMemo('');
         return;
       }
@@ -259,7 +259,6 @@ export default function LogCreateScreen() {
               inputMode="numeric"
               value={bpSys}
               onChangeText={setBpSys}
-              placeholder="例) 120"
             />
             <Text style={styles.mmHg}>mmHg</Text>
           </View>
@@ -271,7 +270,6 @@ export default function LogCreateScreen() {
               inputMode="numeric"
               value={bpDia}
               onChangeText={setBpDia}
-              placeholder="例) 80"
             />
             <Text style={styles.mmHg}>mmHg</Text>
           </View>
