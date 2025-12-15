@@ -33,16 +33,26 @@ function formatJpDate(d: Date): string {
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日（${w}）`;
 }
 
-function buildMonthGrid(base: Date): DayCell[] {
+function buildMonthGrid(base: Date): DayCell[][] {
   const first = startOfMonth(base);
   const firstWeekday = first.getDay(); // 0..6
   const gridStart = addDays(first, -firstWeekday);
-  const cells: DayCell[] = [];
-  for (let i = 0; i < 42; i++) {
-    const date = addDays(gridStart, i);
-    cells.push({ date, inMonth: date.getMonth() === base.getMonth() });
+  const weeks: DayCell[][] = [];
+  for (let w = 0; w < 6; w++) {
+    const week: DayCell[] = [];
+    let hasInMonth = false;
+    for (let d = 0; d < 7; d++) {
+      const date = addDays(gridStart, w * 7 + d);
+      const inMonth = date.getMonth() === base.getMonth();
+      if (inMonth) hasInMonth = true;
+      week.push({ date, inMonth });
+    }
+    // その月の日が1日でもある週のみ追加
+    if (hasInMonth) {
+      weeks.push(week);
+    }
   }
-  return cells;
+  return weeks;
 }
 
 function computeStatusColor(v: number | undefined): string | null {
@@ -131,15 +141,17 @@ export default function ReportScreen() {
 
   // 月のグリッドに含まれる全日付のドット色（データ有無）を事前取得
   const loadMonthDots = async () => {
-    const cells = buildMonthGrid(month);
+    const weeks = buildMonthGrid(month);
     const entries: Record<string, string | null> = {};
     
-    const startDate = toIsoDate(cells[0].date);
-    const endDate = toIsoDate(cells[cells.length - 1].date);
+    // 全セルをフラット化
+    const allCells = weeks.flat();
+    const startDate = toIsoDate(allCells[0].date);
+    const endDate = toIsoDate(allCells[allCells.length - 1].date);
     
     const logsMap = await getDailyConditionLogsInRange(startDate, endDate);
     
-    for (const c of cells) {
+    for (const c of allCells) {
       const iso = toIsoDate(c.date);
       const log = logsMap.get(iso);
       if (!log) {
@@ -281,37 +293,41 @@ export default function ReportScreen() {
           ))}
         </View>
         <View style={styles.grid}>
-          {grid.map((cell, idx) => {
-            const iso = toIsoDate(cell.date);
-            const isSel = iso === toIsoDate(selected);
-            const inMonth = cell.inMonth;
-            const day = cell.date.getDate();
-            const dotColor = dayDots[iso] ?? null;
-            return (
-              <Pressable
-                key={idx}
-                onPress={() => handleSelectDate(cell.date)}
-                style={[
-                  styles.cell,
-                  !inMonth && styles.cellDim,
-                  isSel && styles.cellSelected,
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.dayText,
-                    !inMonth && styles.dayDim,
-                    isSel && styles.daySelected,
-                  ]}
-                >
-                  {day}
-                </Text>
-                <View style={styles.dotSlot}>
-                  {dotColor && <View style={[styles.dot, { backgroundColor: dotColor }]} />}
-                </View>
-              </Pressable>
-            );
-          })}
+          {grid.map((week, weekIdx) => (
+            <View key={weekIdx} style={styles.weekRow}>
+              {week.map((cell, dayIdx) => {
+                const iso = toIsoDate(cell.date);
+                const isSel = iso === toIsoDate(selected);
+                const inMonth = cell.inMonth;
+                const day = cell.date.getDate();
+                const dotColor = dayDots[iso] ?? null;
+                return (
+                  <Pressable
+                    key={dayIdx}
+                    onPress={() => handleSelectDate(cell.date)}
+                    style={[
+                      styles.cell,
+                      !inMonth && styles.cellDim,
+                      isSel && styles.cellSelected,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.dayText,
+                        !inMonth && styles.dayDim,
+                        isSel && styles.daySelected,
+                      ]}
+                    >
+                      {day}
+                    </Text>
+                    <View style={styles.dotSlot}>
+                      {dotColor && <View style={[styles.dot, { backgroundColor: dotColor }]} />}
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </View>
+          ))}
         </View>
         <View style={styles.legendRow}>
           <View style={styles.legendItem}>
@@ -493,13 +509,26 @@ function BarWithBubble({ value }: { value: number }) {
 }
 
 function BarWithBubbleInline({ value }: { value: number }) {
+  const [barWidth, setBarWidth] = useState(0);
   const percentage = Math.max(0, Math.min(200, value)) / 2;
+  
+  // バブルの位置を計算（枠をはみ出さないように制限）
+  const bubbleWidth = 40; // minWidth
+  const bubbleHalf = bubbleWidth / 2;
+  const rawPosition = (barWidth * percentage) / 100;
+  const clampedPosition = Math.max(bubbleHalf, Math.min(barWidth - bubbleHalf, rawPosition));
+  
   return (
     <View style={styles.barInlineContainer}>
-      <View style={[styles.barInlineBubble, { left: `${percentage}%` }]}>
-        <Text style={styles.barInlineBubbleText}>{value}</Text>
-      </View>
-      <View style={styles.barInlineWrap}>
+      {barWidth > 0 && (
+        <View style={[styles.barInlineBubble, { left: clampedPosition, transform: [{ translateX: -bubbleHalf }] }]}>
+          <Text style={styles.barInlineBubbleText}>{value}</Text>
+        </View>
+      )}
+      <View 
+        style={styles.barInlineWrap}
+        onLayout={(e) => setBarWidth(e.nativeEvent.layout.width)}
+      >
         <View style={[styles.barFill, { width: `${percentage}%` }]} />
       </View>
     </View>
@@ -528,7 +557,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 8,
+    marginTop: 8,
+    marginBottom: 16,
   },
   arrow: {
     fontSize: 20,
@@ -553,8 +583,10 @@ const styles = StyleSheet.create({
     color: Colors.grayBlue,
   },
   grid: {
+    flexDirection: 'column',
+  },
+  weekRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
   },
   cell: {
     width: `${100 / 7}%`,
@@ -593,7 +625,8 @@ const styles = StyleSheet.create({
   legendRow: {
     marginTop: 10,
     flexDirection: 'row',
-    justifyContent: 'space-around',
+    justifyContent: 'center',
+    gap: 24,
   },
   legendItem: {
     flexDirection: 'row',
@@ -607,7 +640,7 @@ const styles = StyleSheet.create({
     borderRadius: 5,
   },
   legendText: {
-    color: Colors.grayBlue,
+    color: Colors.deepInkBrown,
     fontSize: 12,
   },
   scrollArea: {
@@ -791,7 +824,6 @@ const styles = StyleSheet.create({
   barInlineBubble: {
     position: 'absolute',
     top: 0,
-    transform: [{ translateX: -20 }],
     backgroundColor: Colors.deepNeuroBlue,
     paddingHorizontal: 10,
     paddingVertical: 4,
