@@ -30,7 +30,7 @@ function formatJpMonth(d: Date): string {
 }
 function formatJpDate(d: Date): string {
   const w = ['日', '月', '火', '水', '木', '金', '土'][d.getDay()];
-  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日（${w}）`;
+  return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}（${w}）`;
 }
 
 function buildMonthGrid(base: Date): DayCell[][] {
@@ -135,11 +135,14 @@ export default function ReportScreen() {
   // 日次レポートリスト用
   const [dailyLogs, setDailyLogs] = useState<Array<{ date: Date; log: DailyConditionLog | null }>>([]);
   const [oldestLoadedDate, setOldestLoadedDate] = useState<Date>(new Date());
+  const [newestLoadedDate, setNewestLoadedDate] = useState<Date>(new Date());
   const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const [hasMoreData, setHasMoreData] = useState(true);
+  const [hasMorePastData, setHasMorePastData] = useState(true);
+  const [hasMoreFutureData, setHasMoreFutureData] = useState(false);
   
   const scrollViewRef = useRef<ScrollView>(null);
   const cardPositions = useRef<Record<string, number>>({});
+  const pendingScrollToDate = useRef<string | null>(null);
 
   const grid = useMemo(() => buildMonthGrid(month), [month]);
   const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
@@ -205,7 +208,9 @@ export default function ReportScreen() {
     
     setDailyLogs(arr);
     setOldestLoadedDate(startDate);
-    setHasMoreData(true);
+    setNewestLoadedDate(today);
+    setHasMorePastData(true);
+    setHasMoreFutureData(false);
   }, []);
 
   useEffect(() => {
@@ -213,8 +218,8 @@ export default function ReportScreen() {
   }, [loadInitialDailyLogs, seedTick]);
 
   // 追加ロード: 過去のデータを取得
-  const loadMoreDailyLogs = useCallback(async () => {
-    if (isLoadingMore || !hasMoreData) return;
+  const loadMorePastLogs = useCallback(async () => {
+    if (isLoadingMore || !hasMorePastData) return;
     
     setIsLoadingMore(true);
     
@@ -225,7 +230,7 @@ export default function ReportScreen() {
     const oneYearAgo = new Date();
     oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
     if (endDate < oneYearAgo) {
-      setHasMoreData(false);
+      setHasMorePastData(false);
       setIsLoadingMore(false);
       return;
     }
@@ -247,7 +252,93 @@ export default function ReportScreen() {
     setDailyLogs(prev => [...prev, ...arr]);
     setOldestLoadedDate(startDate);
     setIsLoadingMore(false);
-  }, [isLoadingMore, hasMoreData, oldestLoadedDate]);
+  }, [isLoadingMore, hasMorePastData, oldestLoadedDate]);
+
+  // 特定の日付までデータを読み込む
+  const loadLogsUntilDate = useCallback(async (targetDate: Date) => {
+    if (isLoadingMore) return;
+    
+    setIsLoadingMore(true);
+    
+    const targetDateNorm = new Date(targetDate);
+    targetDateNorm.setHours(0, 0, 0, 0);
+    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    // 1年以上前の制限
+    const oneYearAgo = new Date();
+    oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+    
+    let newLogs: Array<{ date: Date; log: DailyConditionLog | null }> = [];
+    let newOldest = oldestLoadedDate;
+    let newNewest = newestLoadedDate;
+    
+    if (targetDateNorm < oldestLoadedDate) {
+      // 過去方向にデータを読み込む
+      const effectiveTarget = targetDateNorm < oneYearAgo ? oneYearAgo : targetDateNorm;
+      const endDate = addDays(oldestLoadedDate, -1);
+      const startDate = effectiveTarget;
+      
+      if (endDate >= startDate) {
+        const logsMap = await getDailyConditionLogsInRange(toIsoDate(startDate), toIsoDate(endDate));
+        
+        // 降順で追加
+        let d = new Date(endDate);
+        while (d >= startDate) {
+          const iso = toIsoDate(d);
+          const log = logsMap.get(iso) ?? null;
+          newLogs.push({ date: new Date(d), log });
+          d = addDays(d, -1);
+        }
+        
+        newOldest = startDate;
+      }
+      
+      if (effectiveTarget <= oneYearAgo) {
+        setHasMorePastData(false);
+      }
+    } else if (targetDateNorm > newestLoadedDate) {
+      // 未来方向にデータを読み込む（今日まで）
+      const effectiveTarget = targetDateNorm > today ? today : targetDateNorm;
+      const startDate = addDays(newestLoadedDate, 1);
+      const endDate = effectiveTarget;
+      
+      if (endDate >= startDate) {
+        const logsMap = await getDailyConditionLogsInRange(toIsoDate(startDate), toIsoDate(endDate));
+        
+        // 降順で追加（新しいデータを先頭に）
+        let d = new Date(endDate);
+        while (d >= startDate) {
+          const iso = toIsoDate(d);
+          const log = logsMap.get(iso) ?? null;
+          newLogs.push({ date: new Date(d), log });
+          d = addDays(d, -1);
+        }
+        
+        newNewest = effectiveTarget;
+      }
+      
+      setHasMoreFutureData(effectiveTarget < today);
+    }
+    
+    if (newLogs.length > 0) {
+      if (targetDateNorm < oldestLoadedDate) {
+        // 過去のデータは末尾に追加
+        setDailyLogs(prev => [...prev, ...newLogs]);
+      } else {
+        // 未来のデータは先頭に追加
+        setDailyLogs(prev => [...newLogs, ...prev]);
+      }
+      setOldestLoadedDate(newOldest);
+      setNewestLoadedDate(newNewest);
+    }
+    
+    setIsLoadingMore(false);
+    
+    // スクロール位置を設定
+    pendingScrollToDate.current = toIsoDate(targetDate);
+  }, [isLoadingMore, oldestLoadedDate, newestLoadedDate]);
 
   // スクロール時に追加データをロード
   const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -255,9 +346,9 @@ export default function ReportScreen() {
     const paddingToBottom = 100;
     
     if (layoutMeasurement.height + contentOffset.y >= contentSize.height - paddingToBottom) {
-      void loadMoreDailyLogs();
+      void loadMorePastLogs();
     }
-  }, [loadMoreDailyLogs]);
+  }, [loadMorePastLogs]);
 
   // 画面に戻ってきたら最新を再取得
   useFocusEffect(
@@ -268,16 +359,42 @@ export default function ReportScreen() {
   );
 
   // カレンダーで日付を選択したとき
-  const handleSelectDate = useCallback((date: Date) => {
+  const handleSelectDate = useCallback(async (date: Date) => {
     setSelected(date);
     
-    // 選択された日付のカードにスクロール
     const iso = toIsoDate(date);
-    const position = cardPositions.current[iso];
-    if (position !== undefined && scrollViewRef.current) {
-      scrollViewRef.current.scrollTo({ y: position, animated: true });
+    const targetDate = new Date(date);
+    targetDate.setHours(0, 0, 0, 0);
+    
+    // 選択された日付がdailyLogsに含まれているかチェック
+    const existsInList = dailyLogs.some(item => toIsoDate(item.date) === iso);
+    
+    if (existsInList) {
+      // すでにリストにある場合はスクロール
+      const position = cardPositions.current[iso];
+      if (position !== undefined && scrollViewRef.current) {
+        scrollViewRef.current.scrollTo({ y: position, animated: true });
+      }
+    } else {
+      // リストにない場合はその日付までデータを読み込む
+      await loadLogsUntilDate(targetDate);
     }
-  }, []);
+  }, [dailyLogs, loadLogsUntilDate]);
+  
+  // データ読み込み後にスクロール
+  useEffect(() => {
+    if (pendingScrollToDate.current) {
+      const iso = pendingScrollToDate.current;
+      // 少し遅延させてレイアウトが完了するのを待つ
+      setTimeout(() => {
+        const position = cardPositions.current[iso];
+        if (position !== undefined && scrollViewRef.current) {
+          scrollViewRef.current.scrollTo({ y: position, animated: true });
+        }
+        pendingScrollToDate.current = null;
+      }, 100);
+    }
+  }, [dailyLogs]);
 
   // カードの位置を記録
   const handleCardLayout = useCallback((date: Date, y: number) => {
@@ -366,7 +483,7 @@ export default function ReportScreen() {
         onScroll={handleScroll}
         scrollEventThrottle={400}
       >
-        {dailyLogs.map(({ date, log }, idx) => (
+        {dailyLogs.map(({ date, log }) => (
           <DailyReportCard 
             key={toIsoDate(date)} 
             date={date} 
@@ -383,7 +500,7 @@ export default function ReportScreen() {
           </View>
         )}
         
-        {!hasMoreData && (
+        {!hasMorePastData && (
           <Text style={styles.noMoreData}>これ以上のデータはありません</Text>
         )}
       </ScrollView>
@@ -670,7 +787,8 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.pureWhite,
     borderRadius: 12,
     marginTop: 8,
-    padding: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
     shadowColor: '#000',
     shadowOpacity: 0.05,
     shadowRadius: 8,
@@ -684,7 +802,9 @@ const styles = StyleSheet.create({
     color: Colors.deepNeuroBlue,
     fontWeight: '700',
     fontSize: 18,
-    marginBottom: 4,
+    marginTop: 8,
+    marginBottom: 12,
+    marginHorizontal: 8,
   },
   divider: {
     height: 2,
@@ -700,6 +820,7 @@ const styles = StyleSheet.create({
   },
   symptomTable: {
     marginBottom: 8,
+    paddingLeft: 8,
   },
   symptomRow: {
     flexDirection: 'row',
@@ -736,6 +857,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
     marginBottom: 8,
     paddingBottom: 4,
+    paddingLeft: 8,
   },
   conditionRowHorizontal: {
     flexDirection: 'row',
@@ -754,6 +876,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     marginBottom: 12,
+    paddingLeft: 8,
   },
   infoLabelInline: {
     color: Colors.deepInkBrown,

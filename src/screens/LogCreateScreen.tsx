@@ -26,10 +26,10 @@ function getBubbleTextColor(value: number): string {
 }
 
 function formatJpDate(date: Date): string {
-  const w = ['日曜日', '月曜日', '火曜日', '水曜日', '木曜日', '金曜日', '土曜日'][date.getDay()];
-  return `${date.getFullYear()}年${String(date.getMonth() + 1).padStart(2, '0')}月${String(
+  const w = ['日', '月', '火', '水', '木', '金', '土'][date.getDay()];
+  return `${date.getFullYear()}/${String(date.getMonth() + 1).padStart(2, '0')}/${String(
     date.getDate()
-  ).padStart(2, '0')}日${w}`;
+  ).padStart(2, '0')}（${w}）`;
 }
 
 function toIsoDate(d: Date): string {
