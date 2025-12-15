@@ -1,7 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View, NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 import { Colors } from '../theme/colors';
-import { getDailyConditionLog, getDailyConditionLogsInRange, ensureDefaultLogsForPastYear } from '../services/db/database';
+import { getDailyConditionLogsInRange, ensureDefaultLogsForPastYear, DailyConditionLog } from '../services/db/database';
 import { useFocusEffect } from '@react-navigation/native';
 
 type DayCell = {
@@ -60,6 +60,15 @@ const DOT_COLORS = {
   good: Colors.deepNeuroBlue,    // 5 のカラー（5択ボタンの5と同色）
 } as const;
 
+// 5択ボタンの色（LogCreateScreenと同じ）
+const LEVEL_COLORS: Record<number, string> = {
+  1: '#D64545',           // 赤
+  2: '#F3B0B0',           // 薄い赤
+  3: '#DDE3EE',           // 中立（グレー）
+  4: '#B7CCEE',           // 薄い青
+  5: Colors.deepNeuroBlue // 濃い青
+};
+
 type StatusKind = 'poor' | 'caution' | 'good';
 
 function computeStatusKindFromLog(log: any): StatusKind {
@@ -91,31 +100,26 @@ function computeStatusKindFromLog(log: any): StatusKind {
   return 'poor';
 }
 
+// 1回にロードする日数
+const DAYS_PER_LOAD = 7;
+
 export default function ReportScreen() {
   const [month, setMonth] = useState<Date>(new Date());
   const [selected, setSelected] = useState<Date>(new Date());
-  const [selectedLog, setSelectedLog] = useState<any | null>(null);
-  const [weekStart, setWeekStart] = useState<Date>(() => {
-    const d = new Date();
-    const start = new Date(d);
-    start.setDate(d.getDate() - d.getDay()); // 日曜始まり
-    start.setHours(0, 0, 0, 0);
-    return start;
-  });
-  const [weekLogs, setWeekLogs] = useState<Array<{ date: Date; log: any | null }>>([]);
   const [dayDots, setDayDots] = useState<Record<string, string | null>>({});
   const [seedTick, setSeedTick] = useState(0);
+  
+  // 日次レポートリスト用
+  const [dailyLogs, setDailyLogs] = useState<Array<{ date: Date; log: DailyConditionLog | null }>>([]);
+  const [oldestLoadedDate, setOldestLoadedDate] = useState<Date>(new Date());
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [hasMoreData, setHasMoreData] = useState(true);
+  
+  const scrollViewRef = useRef<ScrollView>(null);
+  const cardPositions = useRef<Record<string, number>>({});
 
   const grid = useMemo(() => buildMonthGrid(month), [month]);
   const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
-
-  const loadSelected = async () => {
-    const log = await getDailyConditionLog(toIsoDate(selected));
-    setSelectedLog(log);
-  };
-  useEffect(() => {
-    void loadSelected();
-  }, [selected]);
 
   // 初回に過去1年の未記録日をデフォルトで作成
   useEffect(() => {
@@ -126,16 +130,13 @@ export default function ReportScreen() {
   }, []);
 
   // 月のグリッドに含まれる全日付のドット色（データ有無）を事前取得
-  // 一括取得で DB 呼び出しを 42 回 → 1 回に削減
   const loadMonthDots = async () => {
     const cells = buildMonthGrid(month);
     const entries: Record<string, string | null> = {};
     
-    // グリッドの開始日と終了日を取得
     const startDate = toIsoDate(cells[0].date);
     const endDate = toIsoDate(cells[cells.length - 1].date);
     
-    // 範囲内のログを一括取得（1回のDBクエリ）
     const logsMap = await getDailyConditionLogsInRange(startDate, endDate);
     
     for (const c of cells) {
@@ -152,40 +153,116 @@ export default function ReportScreen() {
     }
     setDayDots(entries);
   };
+
   useEffect(() => {
     void loadMonthDots();
   }, [month, seedTick]);
 
-  // 画面に戻ってきたら最新を再取得（自動保存直後の反映）
+  // 初期ロード: 今日から1週間分のデータを降順で取得
+  const loadInitialDailyLogs = useCallback(async () => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const startDate = addDays(today, -(DAYS_PER_LOAD - 1));
+    
+    const endDateStr = toIsoDate(today);
+    const startDateStr = toIsoDate(startDate);
+    
+    const logsMap = await getDailyConditionLogsInRange(startDateStr, endDateStr);
+    
+    const arr: Array<{ date: Date; log: DailyConditionLog | null }> = [];
+    // 降順で追加（今日から過去へ）
+    for (let i = 0; i < DAYS_PER_LOAD; i++) {
+      const d = addDays(today, -i);
+      const iso = toIsoDate(d);
+      const log = logsMap.get(iso) ?? null;
+      arr.push({ date: new Date(d), log });
+    }
+    
+    setDailyLogs(arr);
+    setOldestLoadedDate(startDate);
+    setHasMoreData(true);
+  }, []);
+
+  useEffect(() => {
+    void loadInitialDailyLogs();
+  }, [loadInitialDailyLogs, seedTick]);
+
+  // 追加ロード: 過去のデータを取得
+  const loadMoreDailyLogs = useCallback(async () => {
+    if (isLoadingMore || !hasMoreData) return;
+    
+    setIsLoadingMore(true);
+    
+    const endDate = addDays(oldestLoadedDate, -1);
+    const startDate = addDays(endDate, -(DAYS_PER_LOAD - 1));
+    
+    // 1年以上前のデータは読み込まない
+    const oneYearAgo = new Date();
+    oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+    if (endDate < oneYearAgo) {
+      setHasMoreData(false);
+      setIsLoadingMore(false);
+      return;
+    }
+    
+    const endDateStr = toIsoDate(endDate);
+    const startDateStr = toIsoDate(startDate);
+    
+    const logsMap = await getDailyConditionLogsInRange(startDateStr, endDateStr);
+    
+    const arr: Array<{ date: Date; log: DailyConditionLog | null }> = [];
+    // 降順で追加
+    for (let i = 0; i < DAYS_PER_LOAD; i++) {
+      const d = addDays(endDate, -i);
+      const iso = toIsoDate(d);
+      const log = logsMap.get(iso) ?? null;
+      arr.push({ date: new Date(d), log });
+    }
+    
+    setDailyLogs(prev => [...prev, ...arr]);
+    setOldestLoadedDate(startDate);
+    setIsLoadingMore(false);
+  }, [isLoadingMore, hasMoreData, oldestLoadedDate]);
+
+  // スクロール時に追加データをロード
+  const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
+    const paddingToBottom = 100;
+    
+    if (layoutMeasurement.height + contentOffset.y >= contentSize.height - paddingToBottom) {
+      void loadMoreDailyLogs();
+    }
+  }, [loadMoreDailyLogs]);
+
+  // 画面に戻ってきたら最新を再取得
   useFocusEffect(
-    React.useCallback(() => {
-      void loadSelected();
+    useCallback(() => {
       void loadMonthDots();
-    }, [selected, month])
+      void loadInitialDailyLogs();
+    }, [month, loadInitialDailyLogs])
   );
 
-  // 週次ログも一括取得で DB 呼び出しを 7 回 → 1 回に削減
-  useEffect(() => {
-    (async () => {
-      const startDate = toIsoDate(weekStart);
-      const endDate = toIsoDate(addDays(weekStart, 6));
-      
-      // 範囲内のログを一括取得（1回のDBクエリ）
-      const logsMap = await getDailyConditionLogsInRange(startDate, endDate);
-      
-      const arr: Array<{ date: Date; log: any | null }> = [];
-      for (let i = 0; i < 7; i++) {
-        const d = addDays(weekStart, i);
-        const iso = toIsoDate(d);
-        const log = logsMap.get(iso) ?? null;
-        arr.push({ date: d, log });
-      }
-      setWeekLogs(arr);
-    })();
-  }, [weekStart]);
+  // カレンダーで日付を選択したとき
+  const handleSelectDate = useCallback((date: Date) => {
+    setSelected(date);
+    
+    // 選択された日付のカードにスクロール
+    const iso = toIsoDate(date);
+    const position = cardPositions.current[iso];
+    if (position !== undefined && scrollViewRef.current) {
+      scrollViewRef.current.scrollTo({ y: position, animated: true });
+    }
+  }, []);
+
+  // カードの位置を記録
+  const handleCardLayout = useCallback((date: Date, y: number) => {
+    const iso = toIsoDate(date);
+    cardPositions.current[iso] = y;
+  }, []);
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <View style={styles.container}>
+      {/* カレンダー（固定表示） */}
       <View style={styles.calendarCard}>
         <View style={styles.calendarHeader}>
           <Pressable onPress={() => setMonth(addDays(month, -28))}>
@@ -213,7 +290,7 @@ export default function ReportScreen() {
             return (
               <Pressable
                 key={idx}
-                onPress={() => setSelected(cell.date)}
+                onPress={() => handleSelectDate(cell.date)}
                 style={[
                   styles.cell,
                   !inMonth && styles.cellDim,
@@ -252,113 +329,160 @@ export default function ReportScreen() {
         </View>
       </View>
 
-      <View style={styles.detailCard}>
-        <Text style={styles.detailTitle}>{formatJpDate(selected)}</Text>
-        {selectedLog ? (
-          <>
-            <View style={styles.row}>
-              <Text style={styles.label}>頭痛</Text>
-              <Badge value={selectedLog.headacheLevel} />
-              <Text style={styles.label}>てんかん</Text>
-              <Badge value={selectedLog.seizureLevel} />
-              <Text style={styles.label}>右半身</Text>
-              <Badge value={selectedLog.rightSideLevel} />
-              <Text style={styles.label}>左半身</Text>
-              <Badge value={selectedLog.leftSideLevel} />
-            </View>
-            <View style={styles.row}>
-              <Text style={styles.label}>言語</Text>
-              <Badge value={selectedLog.speechImpairmentLevel} />
-              <Text style={styles.label}>記憶</Text>
-              <Badge value={selectedLog.memoryImpairmentLevel} />
-            </View>
-            <View style={styles.row}>
-              <Text style={styles.label}>体調</Text>
-              <Bar value={selectedLog.physicalCondition} />
-              <Text style={styles.valueText}>{selectedLog.physicalCondition}</Text>
-            </View>
-            <View style={styles.row}>
-              <Text style={styles.label}>気持ち</Text>
-              <Bar value={selectedLog.mentalCondition} />
-              <Text style={styles.valueText}>{selectedLog.mentalCondition}</Text>
-            </View>
-            <View style={styles.row}>
-              <Text style={styles.label}>血圧</Text>
-              <Text style={styles.valueText}>
-                最高 {selectedLog.bloodPressureSystolic ?? '-'} 最低{' '}
-                {selectedLog.bloodPressureDiastolic ?? '-'}
-              </Text>
-            </View>
-            {selectedLog.memo ? (
-              <View style={styles.memoBox}>
-                <Text style={styles.memoText}>{selectedLog.memo}</Text>
-              </View>
-            ) : null}
-          </>
-        ) : (
-          <Text style={styles.legendText}>この日の記録はありません</Text>
+      {/* 日次レポートリスト（スクロール可能） */}
+      <ScrollView 
+        ref={scrollViewRef}
+        style={styles.scrollArea}
+        contentContainerStyle={styles.scrollContent}
+        onScroll={handleScroll}
+        scrollEventThrottle={400}
+      >
+        {dailyLogs.map(({ date, log }, idx) => (
+          <DailyReportCard 
+            key={toIsoDate(date)} 
+            date={date} 
+            log={log} 
+            isSelected={toIsoDate(date) === toIsoDate(selected)}
+            onLayout={(y) => handleCardLayout(date, y)}
+          />
+        ))}
+        
+        {isLoadingMore && (
+          <View style={styles.loadingMore}>
+            <ActivityIndicator size="small" color={Colors.deepNeuroBlue} />
+            <Text style={styles.loadingText}>読み込み中...</Text>
+          </View>
         )}
-      </View>
+        
+        {!hasMoreData && (
+          <Text style={styles.noMoreData}>これ以上のデータはありません</Text>
+        )}
+      </ScrollView>
+    </View>
+  );
+}
 
-      <View style={styles.detailCard}>
-        <View style={styles.weekHeader}>
-          <Pressable onPress={() => setWeekStart(addDays(weekStart, -7))}>
-            <Text style={styles.arrow}>{'‹'}</Text>
-          </Pressable>
-        <Text style={styles.detailTitle}>
-          週次 {formatJpDate(weekStart)} 〜 {formatJpDate(addDays(weekStart, 6))}
-        </Text>
-          <Pressable onPress={() => setWeekStart(addDays(weekStart, 7))}>
-            <Text style={styles.arrow}>{'›'}</Text>
-          </Pressable>
-        </View>
-        {weekLogs.map(({ date, log }, idx) => (
-          <View key={idx} style={styles.weekRow}>
-            <Text style={[styles.weekDate, toIsoDate(date) === toIsoDate(selected) && { color: Colors.deepNeuroBlue, fontWeight: '700' }]}>
-              {`${date.getMonth() + 1}/${date.getDate()}(${['日','月','火','水','木','金','土'][date.getDay()]})`}
-            </Text>
-            <View style={styles.weekBadges}>
-              <Badge value={log?.headacheLevel ?? '-'} />
-              <Badge value={log?.seizureLevel ?? '-'} />
-              <Badge value={log?.rightSideLevel ?? '-'} />
-              <Badge value={log?.leftSideLevel ?? '-'} />
+// 日次レポートカードコンポーネント
+function DailyReportCard({ 
+  date, 
+  log, 
+  isSelected,
+  onLayout 
+}: { 
+  date: Date; 
+  log: DailyConditionLog | null; 
+  isSelected: boolean;
+  onLayout: (y: number) => void;
+}) {
+  return (
+    <View 
+      style={[styles.detailCard, isSelected && styles.detailCardSelected]}
+      onLayout={(event) => onLayout(event.nativeEvent.layout.y)}
+    >
+      <Text style={styles.detailTitle}>{formatJpDate(date)}</Text>
+      <View style={styles.divider} />
+      {log ? (
+        <>
+          {/* 症状セクション - 表形式（1行3項目） */}
+          <Text style={styles.sectionTitle}>症状</Text>
+          <View style={styles.symptomTable}>
+            <View style={styles.symptomRow}>
+              <View style={styles.symptomCell}>
+                <Text style={styles.symptomLabel} numberOfLines={1}>頭痛</Text>
+                <Badge value={log.headacheLevel} />
+              </View>
+              <View style={styles.symptomCell}>
+                <Text style={styles.symptomLabel} numberOfLines={1}>てんかん</Text>
+                <Badge value={log.seizureLevel} />
+              </View>
+              <View style={styles.symptomCell}>
+                <Text style={styles.symptomLabel} numberOfLines={1}>右半身</Text>
+                <Badge value={log.rightSideLevel} />
+              </View>
             </View>
-            <View style={styles.weekBars}>
-              <Bar value={log?.physicalCondition ?? 0} />
-              <Bar value={log?.mentalCondition ?? 0} />
+            <View style={styles.symptomRow}>
+              <View style={styles.symptomCell}>
+                <Text style={styles.symptomLabel} numberOfLines={1}>左半身</Text>
+                <Badge value={log.leftSideLevel} />
+              </View>
+              <View style={styles.symptomCell}>
+                <Text style={styles.symptomLabel} numberOfLines={1}>言語</Text>
+                <Badge value={log.speechImpairmentLevel} />
+              </View>
+              <View style={styles.symptomCell}>
+                <Text style={styles.symptomLabel} numberOfLines={1}>記憶</Text>
+                <Badge value={log.memoryImpairmentLevel} />
+              </View>
             </View>
           </View>
-        ))}
-      </View>
-    </ScrollView>
+
+          {/* 体調・気持ちセクション（横並び） */}
+          <View style={styles.conditionRow}>
+            <View style={styles.conditionItem}>
+              <Text style={styles.conditionLabel}>体調</Text>
+              <Text style={styles.conditionValue}>{log.physicalCondition}</Text>
+              <Bar value={log.physicalCondition} />
+            </View>
+            <View style={styles.conditionItem}>
+              <Text style={styles.conditionLabel}>気持ち</Text>
+              <Text style={styles.conditionValue}>{log.mentalCondition}</Text>
+              <Bar value={log.mentalCondition} />
+            </View>
+          </View>
+
+          {/* 血圧セクション */}
+          <Text style={styles.sectionTitle}>血圧</Text>
+          <View style={styles.bloodPressureRow}>
+            <Text style={styles.bpLabel}>最低</Text>
+            <Text style={styles.bpValue}>{log.bloodPressureDiastolic ?? '-'}</Text>
+            <Text style={styles.bpLabel}>最高</Text>
+            <Text style={styles.bpValue}>{log.bloodPressureSystolic ?? '-'}</Text>
+          </View>
+
+          {log.memo ? (
+            <View style={styles.memoBox}>
+              <Text style={styles.memoText}>{log.memo}</Text>
+            </View>
+          ) : null}
+        </>
+      ) : (
+        <Text style={styles.legendText}>この日の記録はありません</Text>
+      )}
+    </View>
   );
 }
 
 function Badge({ value }: { value: number }) {
+  const bgColor = LEVEL_COLORS[value] ?? '#DDE3EE';
+  // 1, 2, 5 は白文字、3, 4 は濃い色の文字
+  const textColor = value === 1 || value === 2 || value === 5 
+    ? Colors.pureWhite 
+    : Colors.deepNeuroBlue;
+  
   return (
-    <View style={styles.badge}>
-      <Text style={styles.badgeText}>{value}</Text>
+    <View style={[styles.badge, { backgroundColor: bgColor }]}>
+      <Text style={[styles.badgeText, { color: textColor }]}>{value}</Text>
     </View>
   );
 }
 
 function Bar({ value }: { value: number }) {
-  const color = computeStatusColor(value) ?? Colors.softBlueGradient;
+  // LogCreateScreenと同じ色を使用
   return (
     <View style={styles.barWrap}>
-      <View style={[styles.barFill, { width: `${Math.max(0, Math.min(200, value)) / 2}%`, backgroundColor: color }]} />
+      <View style={[styles.barFill, { width: `${Math.max(0, Math.min(200, value)) / 2}%` }]} />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    paddingBottom: 40,
-    alignItems: 'center',
+    flex: 1,
     backgroundColor: Colors.lightBlueWash,
   },
   calendarCard: {
     width: '96%',
+    alignSelf: 'center',
     backgroundColor: Colors.pureWhite,
     borderRadius: 12,
     marginTop: 12,
@@ -455,42 +579,108 @@ const styles = StyleSheet.create({
     color: Colors.grayBlue,
     fontSize: 12,
   },
+  scrollArea: {
+    flex: 1,
+    marginTop: 8,
+  },
+  scrollContent: {
+    paddingHorizontal: '2%',
+    paddingBottom: 40,
+  },
   detailCard: {
-    width: '96%',
     backgroundColor: Colors.pureWhite,
     borderRadius: 12,
-    marginTop: 12,
+    marginTop: 8,
     padding: 12,
     shadowColor: '#000',
     shadowOpacity: 0.05,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 2 },
   },
+  detailCardSelected: {
+    borderWidth: 2,
+    borderColor: Colors.deepNeuroBlue,
+  },
   detailTitle: {
     color: Colors.deepNeuroBlue,
     fontWeight: '700',
-    marginBottom: 10,
+    fontSize: 18,
+    marginBottom: 4,
   },
-  row: {
+  divider: {
+    height: 2,
+    backgroundColor: Colors.softBlueGradient,
+    marginBottom: 16,
+  },
+  sectionTitle: {
+    color: Colors.deepInkBrown,
+    fontWeight: '600',
+    fontSize: 15,
+    marginTop: 12,
+    marginBottom: 12,
+  },
+  symptomTable: {
+    marginBottom: 8,
+  },
+  symptomRow: {
+    flexDirection: 'row',
+    marginBottom: 12,
+  },
+  symptomCell: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  symptomLabel: {
+    color: Colors.deepInkBrown,
+    fontSize: 14,
+    width: 64,
+    textAlign: 'left',
+  },
+  conditionRow: {
+    flexDirection: 'row',
+    marginTop: 16,
+    marginBottom: 16,
+    gap: 16,
+  },
+  conditionItem: {
+    flex: 1,
+  },
+  conditionLabel: {
+    color: Colors.deepInkBrown,
+    fontSize: 14,
+    marginBottom: 4,
+  },
+  conditionValue: {
+    color: Colors.deepInkBrown,
+    fontWeight: '600',
+    fontSize: 14,
+    textAlign: 'right',
+    marginBottom: 4,
+  },
+  bloodPressureRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    flexWrap: 'wrap',
-    marginBottom: 8,
+    marginBottom: 12,
   },
-  label: {
+  bpLabel: {
     color: Colors.deepInkBrown,
-    width: 48,
-    textAlign: 'right',
+    fontSize: 14,
+  },
+  bpValue: {
+    color: Colors.deepInkBrown,
+    fontWeight: '600',
+    fontSize: 16,
+    marginRight: 16,
   },
   badge: {
-    minWidth: 28,
+    width: 36,
     height: 28,
     borderRadius: 6,
     backgroundColor: '#DDE3EE',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 6,
   },
   badgeText: {
     color: Colors.deepNeuroBlue,
@@ -498,19 +688,15 @@ const styles = StyleSheet.create({
   },
   barWrap: {
     flex: 1,
-    height: 8,
+    height: 10,
     borderRadius: 6,
-    backgroundColor: '#EEF3FB',
+    backgroundColor: '#C5D3E8',
     overflow: 'hidden',
   },
   barFill: {
     height: '100%',
     borderRadius: 6,
-  },
-  valueText: {
-    width: 40,
-    textAlign: 'right',
-    color: Colors.deepInkBrown,
+    backgroundColor: Colors.softBlueGradient,
   },
   memoBox: {
     marginTop: 6,
@@ -522,27 +708,21 @@ const styles = StyleSheet.create({
     color: Colors.deepInkBrown,
     lineHeight: 18,
   },
-  weekHeader: {
+  loadingMore: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 6,
+    justifyContent: 'center',
+    paddingVertical: 16,
+    gap: 8,
   },
-  weekRow: {
-    marginBottom: 10,
+  loadingText: {
+    color: Colors.grayBlue,
+    fontSize: 14,
   },
-  weekDate: {
-    color: Colors.deepInkBrown,
-    marginBottom: 4,
-  },
-  weekBadges: {
-    flexDirection: 'row',
-    gap: 6,
-    marginBottom: 6,
-  },
-  weekBars: {
-    gap: 6,
+  noMoreData: {
+    textAlign: 'center',
+    color: Colors.grayBlue,
+    fontSize: 12,
+    paddingVertical: 16,
   },
 });
-
-

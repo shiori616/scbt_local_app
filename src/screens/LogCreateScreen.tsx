@@ -1,8 +1,7 @@
 import React, { useMemo, useRef, useState, useEffect, useCallback } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View, PanResponder, GestureResponderEvent, PanResponderGestureState, KeyboardAvoidingView, Platform } from 'react-native';
 import { Colors } from '../theme/colors';
 import { getDailyConditionLog, saveDailyConditionLog } from '../services/db/database';
-import Slider from '@react-native-community/slider';
 
 const LEVEL_COLORS: Record<number, string> = {
   // 赤 → 白 → 青 のグラデーション
@@ -57,6 +56,67 @@ function LevelPicker({
   );
 }
 
+// ReportScreenと同様のカスタムバースライダー
+function BarSlider({
+  value,
+  onChange,
+  min = 0,
+  max = 200,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+  min?: number;
+  max?: number;
+}) {
+  const [barWidth, setBarWidth] = useState(0);
+  const barRef = useRef<View>(null);
+  
+  const calculateValue = useCallback((pageX: number) => {
+    if (barWidth === 0) return value;
+    
+    barRef.current?.measure((x, y, width, height, pageXOffset) => {
+      const relativeX = pageX - pageXOffset;
+      const clampedX = Math.max(0, Math.min(barWidth, relativeX));
+      const newValue = Math.round((clampedX / barWidth) * (max - min) + min);
+      onChange(newValue);
+    });
+  }, [barWidth, min, max, onChange, value]);
+  
+  const panResponder = useMemo(() => 
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (evt: GestureResponderEvent) => {
+        calculateValue(evt.nativeEvent.pageX);
+      },
+      onPanResponderMove: (evt: GestureResponderEvent) => {
+        calculateValue(evt.nativeEvent.pageX);
+      },
+    }), [calculateValue]);
+  
+  const percentage = ((value - min) / (max - min)) * 100;
+  const thumbPosition = (barWidth * (value - min)) / (max - min) - 12; // 12 = thumb半径
+  const bubblePosition = Math.max(0, thumbPosition);
+  
+  return (
+    <View style={styles.barSliderContainer}>
+      {/* 数値バブル（つまみの上に表示） */}
+      <View style={[styles.barSliderBubble, { left: bubblePosition }]}>
+        <Text style={styles.barSliderBubbleText}>{value}</Text>
+      </View>
+      <View
+        ref={barRef}
+        style={styles.barSliderTrack}
+        onLayout={(e) => setBarWidth(e.nativeEvent.layout.width)}
+        {...panResponder.panHandlers}
+      >
+        <View style={[styles.barSliderFill, { width: `${percentage}%` }]} />
+        <View style={[styles.barSliderThumb, { left: Math.max(0, thumbPosition) }]} />
+      </View>
+    </View>
+  );
+}
+
 export default function LogCreateScreen() {
   console.log('===== LogCreateScreen RENDER =====');
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
@@ -64,22 +124,45 @@ export default function LogCreateScreen() {
   
   console.log('[LogCreateScreen] Initial recordedDate:', recordedDate);
 
+  // スクロール用ref
+  const scrollViewRef = useRef<ScrollView>(null);
+  const formCardY = useRef<number>(0);
+  const inputPositions = useRef<Record<string, number>>({});
+
+  // formCardの位置を記録
+  const handleFormCardLayout = useCallback((y: number) => {
+    formCardY.current = y;
+  }, []);
+
+  // 入力フィールドの位置を記録
+  const handleInputLayout = useCallback((key: string, y: number) => {
+    inputPositions.current[key] = y;
+  }, []);
+
+  // 入力フィールドにフォーカスが当たった時に自動スクロール
+  const scrollToInput = useCallback((key: string) => {
+    const y = inputPositions.current[key];
+    if (y !== undefined && scrollViewRef.current) {
+      // formCardの位置 + 入力フィールドの相対位置
+      let scrollY = formCardY.current + y;
+      
+      // メモの場合はテキストボックス全体が見えるように調整（キーボードの上に表示）
+      if (key === 'memo') {
+        // メモのテキストエリアは高さ96px + 余白を考慮して、上に少しだけ余白を残す
+        scrollY = scrollY - 50;
+      } else {
+        // その他の入力フィールドは上に余白を持たせる
+        scrollY = scrollY - 100;
+      }
+      
+      scrollViewRef.current.scrollTo({ y: Math.max(0, scrollY), animated: true });
+    }
+  }, []);
+
   // ラベル最大幅を測定して、右端を基準に全行の配置をそろえる
   const [labelMaxWidth, setLabelMaxWidth] = useState(0);
   const onMeasureLabel = (w: number) => {
     setLabelMaxWidth(prev => (w > prev ? w : prev));
-  };
-
-  // スライダーの幅を測定して、現在値のバブル位置を計算する
-  const [sliderWidth, setSliderWidth] = useState(0);
-  const calcBubbleLeft = (val: number) => {
-    const min = 0;
-    const max = 200;
-    const thumb = 20; // だいたいのサム径
-    if (sliderWidth <= 0) return 0;
-    const usable = Math.max(0, sliderWidth - thumb);
-    const ratio = (val - min) / (max - min);
-    return Math.max(0, Math.min(usable, usable * ratio));
   };
 
   const [headache, setHeadache] = useState(5);
@@ -378,7 +461,16 @@ export default function LogCreateScreen() {
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <KeyboardAvoidingView 
+      style={styles.keyboardAvoid}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+    >
+      <ScrollView 
+        ref={scrollViewRef}
+        contentContainerStyle={styles.container}
+        keyboardShouldPersistTaps="handled"
+      >
       <View style={styles.dateHeader}>
         <Pressable
           onPress={() => {
@@ -403,7 +495,10 @@ export default function LogCreateScreen() {
         </Pressable>
       </View>
 
-      <View style={styles.formCard}>
+      <View 
+        style={styles.formCard}
+        onLayout={(e) => handleFormCardLayout(e.nativeEvent.layout.y)}
+      >
         <FormRow label="頭痛" onMeasureLabel={onMeasureLabel} labelMaxWidth={labelMaxWidth}>
           <LevelPicker value={headache} onChange={setHeadache} />
         </FormRow>
@@ -423,109 +518,65 @@ export default function LogCreateScreen() {
           <LevelPicker value={memory} onChange={setMemory} />
         </FormRow>
         <FormRow label="体調" onMeasureLabel={onMeasureLabel} labelMaxWidth={labelMaxWidth}>
-          <View style={styles.sliderBlock}>
-            <View style={styles.sliderRowMain}>
-              <Text style={styles.minMax}>0</Text>
-              <View
-                style={styles.sliderContainer}
-                onLayout={e => setSliderWidth(e.nativeEvent.layout.width)}
-              >
-                <View
-                  style={[
-                    styles.valueBubble,
-                    { left: calcBubbleLeft(physical) },
-                  ]}
-                >
-                  <Text style={styles.valueBubbleText}>{physical}</Text>
-                </View>
-                <Slider
-                  style={styles.slider}
-                  minimumValue={0}
-                  maximumValue={200}
-                  step={1}
-                  value={physical}
-                  onValueChange={(v: number | number[]) =>
-                    setPhysical(Array.isArray(v) ? v[0] : v)
-                  }
-                  minimumTrackTintColor={Colors.softBlueGradient}
-                  maximumTrackTintColor={Colors.lightBlueWash}
-                  thumbTintColor={Colors.deepNeuroBlue}
-                />
-              </View>
-              <Text style={styles.minMax}>200</Text>
-            </View>
+          <View style={styles.barSliderBlock}>
+            <Text style={styles.minMax}>0</Text>
+            <BarSlider value={physical} onChange={setPhysical} min={0} max={200} />
+            <Text style={styles.minMax}>200</Text>
           </View>
         </FormRow>
         <FormRow label="気持ち" onMeasureLabel={onMeasureLabel} labelMaxWidth={labelMaxWidth}>
-          <View style={styles.sliderBlock}>
-            <View style={styles.sliderRowMain}>
-              <Text style={styles.minMax}>0</Text>
-              <View
-                style={styles.sliderContainer}
-                onLayout={e => setSliderWidth(e.nativeEvent.layout.width)}
-              >
-                <View
-                  style={[
-                    styles.valueBubble,
-                    { left: calcBubbleLeft(mental) },
-                  ]}
-                >
-                  <Text style={styles.valueBubbleText}>{mental}</Text>
-                </View>
-                <Slider
-                  style={styles.slider}
-                  minimumValue={0}
-                  maximumValue={200}
-                  step={1}
-                  value={mental}
-                  onValueChange={(v: number | number[]) =>
-                    setMental(Array.isArray(v) ? v[0] : v)
-                  }
-                  minimumTrackTintColor={Colors.softBlueGradient}
-                  maximumTrackTintColor={Colors.lightBlueWash}
-                  thumbTintColor={Colors.deepNeuroBlue}
-                />
-              </View>
-              <Text style={styles.minMax}>200</Text>
+          <View style={styles.barSliderBlock}>
+            <Text style={styles.minMax}>0</Text>
+            <BarSlider value={mental} onChange={setMental} min={0} max={200} />
+            <Text style={styles.minMax}>200</Text>
+          </View>
+        </FormRow>
+        <View onLayout={(e) => handleInputLayout('bpSys', e.nativeEvent.layout.y)}>
+          <FormRow label="最高血圧" onMeasureLabel={onMeasureLabel} labelMaxWidth={labelMaxWidth}>
+            <View style={styles.bpRow}>
+              <TextInput
+                style={styles.numberInput}
+                inputMode="numeric"
+                value={bpSys}
+                onChangeText={setBpSys}
+                onFocus={() => scrollToInput('bpSys')}
+              />
+              <Text style={styles.mmHg}>mmHg</Text>
             </View>
-          </View>
-        </FormRow>
-        <FormRow label="最高血圧" onMeasureLabel={onMeasureLabel} labelMaxWidth={labelMaxWidth}>
-          <View style={styles.bpRow}>
+          </FormRow>
+        </View>
+        <View onLayout={(e) => handleInputLayout('bpDia', e.nativeEvent.layout.y)}>
+          <FormRow label="最低血圧" onMeasureLabel={onMeasureLabel} labelMaxWidth={labelMaxWidth}>
+            <View style={styles.bpRow}>
+              <TextInput
+                style={styles.numberInput}
+                inputMode="numeric"
+                value={bpDia}
+                onChangeText={setBpDia}
+                onFocus={() => scrollToInput('bpDia')}
+              />
+              <Text style={styles.mmHg}>mmHg</Text>
+            </View>
+          </FormRow>
+        </View>
+        <View onLayout={(e) => handleInputLayout('memo', e.nativeEvent.layout.y)}>
+          <FormRow label="メモ" onMeasureLabel={onMeasureLabel} labelMaxWidth={labelMaxWidth} alignTop>
             <TextInput
-              style={styles.numberInput}
-              inputMode="numeric"
-              value={bpSys}
-              onChangeText={setBpSys}
+              style={styles.textArea}
+              value={memo}
+              onChangeText={setMemo}
+              placeholder="体調などの詳細を追加で記録してください"
+              multiline
+              textAlignVertical="top"
+              onFocus={() => scrollToInput('memo')}
             />
-            <Text style={styles.mmHg}>mmHg</Text>
-          </View>
-        </FormRow>
-        <FormRow label="最低血圧" onMeasureLabel={onMeasureLabel} labelMaxWidth={labelMaxWidth}>
-          <View style={styles.bpRow}>
-            <TextInput
-              style={styles.numberInput}
-              inputMode="numeric"
-              value={bpDia}
-              onChangeText={setBpDia}
-            />
-            <Text style={styles.mmHg}>mmHg</Text>
-          </View>
-        </FormRow>
-        <FormRow label="メモ" onMeasureLabel={onMeasureLabel} labelMaxWidth={labelMaxWidth} alignTop>
-          <TextInput
-            style={styles.textArea}
-            value={memo}
-            onChangeText={setMemo}
-            placeholder="体調などの詳細を追加で記録してください"
-            multiline
-            textAlignVertical="top"
-          />
-        </FormRow>
+          </FormRow>
+        </View>
       </View>
 
       {/* 自動保存のためボタンは不要。必要であれば再度有効化できます。 */}
-    </ScrollView>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -559,6 +610,10 @@ function FormRow({
 }
 
 const styles = StyleSheet.create({
+  keyboardAvoid: {
+    flex: 1,
+    backgroundColor: Colors.lightBlueWash,
+  },
   container: {
     paddingTop: 24,
     paddingBottom: 40,
@@ -674,44 +729,64 @@ const styles = StyleSheet.create({
     gap: 12,
     width: '100%',
   },
-  sliderBlock: {
-    width: '100%',
-    marginVertical: 8,
+  minMax: {
+    color: Colors.grayBlue,
+    fontSize: 12,
+    width: 28,
+    textAlign: 'center',
   },
-  sliderContainer: {
-    position: 'relative',
-    flex: 1,
-    justifyContent: 'center',
-  },
-  sliderRowMain: {
+  barSliderBlock: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 0,
+    alignItems: 'flex-end',
     width: '100%',
+    gap: 8,
+    paddingBottom: 6,
   },
-  slider: {
+  barSliderContainer: {
     flex: 1,
-    height: 34,
+    height: 50,
+    justifyContent: 'flex-end',
+    paddingTop: 26,
   },
-  valueBubble: {
+  barSliderBubble: {
     position: 'absolute',
-    top: -22,
-    transform: [{ translateX: -10 }],
+    top: 0,
     backgroundColor: Colors.deepNeuroBlue,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
     borderRadius: 6,
+    minWidth: 36,
+    alignItems: 'center',
   },
-  valueBubbleText: {
+  barSliderBubbleText: {
     color: Colors.pureWhite,
     fontSize: 12,
     fontWeight: '700',
   },
-  minMax: {
-    color: Colors.grayBlue,
-    fontSize: 12,
-    width: 32,
-    textAlign: 'center',
+  barSliderTrack: {
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#C5D3E8',
+    overflow: 'visible',
+    position: 'relative',
+  },
+  barSliderFill: {
+    height: '100%',
+    borderRadius: 6,
+    backgroundColor: Colors.softBlueGradient,
+  },
+  barSliderThumb: {
+    position: 'absolute',
+    top: -6,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: Colors.deepNeuroBlue,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
   },
   bpRow: {
     flexDirection: 'row',
