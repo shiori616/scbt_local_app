@@ -302,4 +302,41 @@ export async function saveDailyConditionLog(log: DailyConditionLog): Promise<voi
   );
 }
 
+// Utility: 指定範囲の日付について、未記録ならデフォルト値で作成
+export async function ensureDefaultLogsForRange(startDate: Date, endDate: Date): Promise<void> {
+  const toIso = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const oneDayMs = 24 * 60 * 60 * 1000;
+  const start = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+  const end = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
+  for (let t = start.getTime(); t <= end.getTime(); t += oneDayMs) {
+    const d = new Date(t);
+    const iso = toIso(d);
+    const exists = await getDailyConditionLog(iso);
+    if (exists) continue;
+    await saveDailyConditionLog({
+      recordedDate: iso,
+      memo: '',
+      headacheLevel: 5,
+      seizureLevel: 5,
+      rightSideLevel: 5,
+      leftSideLevel: 5,
+      speechImpairmentLevel: 5,
+      memoryImpairmentLevel: 5,
+      physicalCondition: 100,
+      mentalCondition: 100,
+      bloodPressureSystolic: null,
+      bloodPressureDiastolic: null,
+    });
+  }
+}
+
+// 過去1年分（今日を含む）をデフォルト作成
+export async function ensureDefaultLogsForPastYear(): Promise<void> {
+  const today = new Date();
+  const lastYear = new Date(today);
+  lastYear.setFullYear(today.getFullYear() - 1);
+  await ensureDefaultLogsForRange(lastYear, today);
+}
+
 

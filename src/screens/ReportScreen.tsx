@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Colors } from '../theme/colors';
-import { getDailyConditionLog } from '../services/db/database';
+import { getDailyConditionLog, ensureDefaultLogsForPastYear } from '../services/db/database';
+import { useFocusEffect } from '@react-navigation/native';
 
 type DayCell = {
   date: Date;
@@ -52,6 +53,44 @@ function computeStatusColor(v: number | undefined): string | null {
   return '#868C96'; // gray (bad)
 }
 
+// カレンダードット用の3色（5段階ボタンの 1,2,4 に対応）
+const DOT_COLORS = {
+  poor: '#D64545',    // 1 のカラー
+  caution: '#F3B0B0', // 2 のカラー
+  good: Colors.deepNeuroBlue,    // 5 のカラー（5択ボタンの5と同色）
+} as const;
+
+type StatusKind = 'poor' | 'caution' | 'good';
+
+function computeStatusKindFromLog(log: any): StatusKind {
+  const fiveLevels = [
+    Number(log?.headacheLevel ?? 0),
+    Number(log?.seizureLevel ?? 0),
+    Number(log?.rightSideLevel ?? 0),
+    Number(log?.leftSideLevel ?? 0),
+    Number(log?.speechImpairmentLevel ?? 0),
+    Number(log?.memoryImpairmentLevel ?? 0),
+  ];
+  const physical = Number(log?.physicalCondition ?? 0);
+  const mental = Number(log?.mentalCondition ?? 0);
+
+  const allAre = (vals: number[], allowed: number[]) =>
+    vals.every(v => allowed.includes(v));
+
+  // 良好: 5択がすべて5 かつ 体調・気持ちがどちらも 100 以上
+  if (allAre(fiveLevels, [5]) && physical >= 100 && mental >= 100) {
+    return 'good';
+  }
+  // 注意: 5択がすべて3または4、あるいは 体調・気持ちのいずれかが 50〜99
+  const anyBetween50And99 =
+    (physical >= 50 && physical < 100) || (mental >= 50 && mental < 100);
+  if (allAre(fiveLevels, [3, 4]) || anyBetween50And99) {
+    return 'caution';
+  }
+  // それ以外は不調
+  return 'poor';
+}
+
 export default function ReportScreen() {
   const [month, setMonth] = useState<Date>(new Date());
   const [selected, setSelected] = useState<Date>(new Date());
@@ -64,16 +103,57 @@ export default function ReportScreen() {
     return start;
   });
   const [weekLogs, setWeekLogs] = useState<Array<{ date: Date; log: any | null }>>([]);
+  const [dayDots, setDayDots] = useState<Record<string, string | null>>({});
+  const [seedTick, setSeedTick] = useState(0);
 
   const grid = useMemo(() => buildMonthGrid(month), [month]);
   const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
 
+  const loadSelected = async () => {
+    const log = await getDailyConditionLog(toIsoDate(selected));
+    setSelectedLog(log);
+  };
+  useEffect(() => {
+    void loadSelected();
+  }, [selected]);
+
+  // 初回に過去1年の未記録日をデフォルトで作成
   useEffect(() => {
     (async () => {
-      const log = await getDailyConditionLog(toIsoDate(selected));
-      setSelectedLog(log);
+      await ensureDefaultLogsForPastYear();
+      setSeedTick(x => x + 1);
     })();
-  }, [selected]);
+  }, []);
+
+  // 月のグリッドに含まれる全日付のドット色（データ有無）を事前取得
+  const loadMonthDots = async () => {
+    const cells = buildMonthGrid(month);
+    const entries: Record<string, string | null> = {};
+    for (const c of cells) {
+      const iso = toIsoDate(c.date);
+      const log = await getDailyConditionLog(iso);
+      if (!log) {
+        entries[iso] = null;
+        continue;
+      }
+      const kind = computeStatusKindFromLog(log);
+      const color =
+        kind === 'good' ? DOT_COLORS.good : kind === 'caution' ? DOT_COLORS.caution : DOT_COLORS.poor;
+      entries[iso] = color;
+    }
+    setDayDots(entries);
+  };
+  useEffect(() => {
+    void loadMonthDots();
+  }, [month, seedTick]);
+
+  // 画面に戻ってきたら最新を再取得（自動保存直後の反映）
+  useFocusEffect(
+    React.useCallback(() => {
+      void loadSelected();
+      void loadMonthDots();
+    }, [selected, month])
+  );
 
   useEffect(() => {
     (async () => {
@@ -112,10 +192,7 @@ export default function ReportScreen() {
             const isSel = iso === toIsoDate(selected);
             const inMonth = cell.inMonth;
             const day = cell.date.getDate();
-            // Dot color from selectedLog-like rule is unknown beforehand;
-            // here we fetch per cell lazily could be heavy; for now simple heuristic:
-            // mark only selected day; improvement: prefetch in parallel.
-            const dotColor = isSel ? Colors.deepNeuroBlue : null;
+            const dotColor = dayDots[iso] ?? null;
             return (
               <Pressable
                 key={idx}
@@ -144,19 +221,15 @@ export default function ReportScreen() {
         </View>
         <View style={styles.legendRow}>
           <View style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: '#335187' }]} />
+            <View style={[styles.legendDot, { backgroundColor: DOT_COLORS.poor }]} />
             <Text style={styles.legendText}>不調</Text>
           </View>
           <View style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: '#8CB6DB' }]} />
+            <View style={[styles.legendDot, { backgroundColor: DOT_COLORS.caution }]} />
             <Text style={styles.legendText}>注意</Text>
           </View>
           <View style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: '#DDE3EE' }]} />
-            <Text style={styles.legendText}>普通</Text>
-          </View>
-          <View style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: '#335187' }]} />
+            <View style={[styles.legendDot, { backgroundColor: DOT_COLORS.good }]} />
             <Text style={styles.legendText}>良好</Text>
           </View>
         </View>

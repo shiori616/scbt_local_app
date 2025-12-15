@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState, useEffect } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Colors } from '../theme/colors';
 import { getDailyConditionLog, saveDailyConditionLog } from '../services/db/database';
@@ -93,23 +93,117 @@ export default function LogCreateScreen() {
   const [bpDia, setBpDia] = useState<string>('');
   const [memo, setMemo] = useState<string>('');
 
+  // 変更があれば自動保存（デバウンス）
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleAutoSave = () => {
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+    }
+    autoSaveTimerRef.current = setTimeout(() => {
+      void saveDailyConditionLog({
+        recordedDate,
+        memo,
+        headacheLevel: headache,
+        seizureLevel: seizure,
+        rightSideLevel: rightSide,
+        leftSideLevel: leftSide,
+        speechImpairmentLevel: speech,
+        memoryImpairmentLevel: memory,
+        physicalCondition: Math.max(0, Math.min(200, Number(physical) || 0)),
+        mentalCondition: Math.max(0, Math.min(200, Number(mental) || 0)),
+        bloodPressureSystolic: bpSys ? Number(bpSys) : null,
+        bloodPressureDiastolic: bpDia ? Number(bpDia) : null,
+      });
+    }, 400);
+  };
+
+  // アンマウント時に未実行の保存をフラッシュ
+  useEffect(() => {
+    return () => {
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+        void saveDailyConditionLog({
+          recordedDate,
+          memo,
+          headacheLevel: headache,
+          seizureLevel: seizure,
+          rightSideLevel: rightSide,
+          leftSideLevel: leftSide,
+          speechImpairmentLevel: speech,
+          memoryImpairmentLevel: memory,
+          physicalCondition: Math.max(0, Math.min(200, Number(physical) || 0)),
+          mentalCondition: Math.max(0, Math.min(200, Number(mental) || 0)),
+          bloodPressureSystolic: bpSys ? Number(bpSys) : null,
+          bloodPressureDiastolic: bpDia ? Number(bpDia) : null,
+        });
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    scheduleAutoSave();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    recordedDate,
+    headache,
+    seizure,
+    rightSide,
+    leftSide,
+    speech,
+    memory,
+    physical,
+    mental,
+    bpSys,
+    bpDia,
+    memo,
+  ]);
+
   // 日付変更時にデータを読み込み
   React.useEffect(() => {
     (async () => {
       const loaded = await getDailyConditionLog(recordedDate);
       if (!loaded) {
         // デフォルトにリセット（5段階=5、200段階=100、血圧は空欄）
-        setHeadache(5);
-        setSeizure(5);
-        setRightSide(5);
-        setLeftSide(5);
-        setSpeech(5);
-        setMemory(5);
-        setPhysical(100);
-        setMental(100);
-        setBpSys('');
-        setBpDia('');
-        setMemo('');
+        const defaults = {
+          headache: 5,
+          seizure: 5,
+          rightSide: 5,
+          leftSide: 5,
+          speech: 5,
+          memory: 5,
+          physical: 100,
+          mental: 100,
+          bpSys: '',
+          bpDia: '',
+          memoText: '',
+        };
+        setHeadache(defaults.headache);
+        setSeizure(defaults.seizure);
+        setRightSide(defaults.rightSide);
+        setLeftSide(defaults.leftSide);
+        setSpeech(defaults.speech);
+        setMemory(defaults.memory);
+        setPhysical(defaults.physical);
+        setMental(defaults.mental);
+        setBpSys(defaults.bpSys);
+        setBpDia(defaults.bpDia);
+        setMemo(defaults.memoText);
+        // まだデータが無い日は、表示中のデフォルト値で即時作成する
+        await saveDailyConditionLog({
+          recordedDate,
+          memo: defaults.memoText,
+          headacheLevel: defaults.headache,
+          seizureLevel: defaults.seizure,
+          rightSideLevel: defaults.rightSide,
+          leftSideLevel: defaults.leftSide,
+          speechImpairmentLevel: defaults.speech,
+          memoryImpairmentLevel: defaults.memory,
+          physicalCondition: defaults.physical,
+          mentalCondition: defaults.mental,
+          bloodPressureSystolic: null,
+          bloodPressureDiastolic: null,
+        });
         return;
       }
       setHeadache(loaded.headacheLevel ?? 1);
@@ -286,9 +380,7 @@ export default function LogCreateScreen() {
         </FormRow>
       </View>
 
-      <Pressable style={({ pressed }) => [styles.saveBtn, pressed && { opacity: 0.9 }]} onPress={handleSave}>
-        <Text style={styles.saveText}>保存</Text>
-      </Pressable>
+      {/* 自動保存のためボタンは不要。必要であれば再度有効化できます。 */}
     </ScrollView>
   );
 }
