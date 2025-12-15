@@ -104,6 +104,22 @@ export default function LogCreateScreen() {
 
   // 変更があれば自動保存（デバウンス）
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 保留中の変更があるかどうか
+  const hasPendingChangesRef = useRef(false);
+  // アンマウント時に保存するための現在のフォーム値
+  const formDataRef = useRef({
+    memo: '',
+    headache: 5,
+    seizure: 5,
+    rightSide: 5,
+    leftSide: 5,
+    speech: 5,
+    memory: 5,
+    physical: 100,
+    mental: 100,
+    bpSys: '',
+    bpDia: '',
+  });
 
   const doSave = useCallback(async (targetDate: string, data: {
     memo: string;
@@ -140,6 +156,27 @@ export default function LogCreateScreen() {
       if (autoSaveTimerRef.current) {
         clearTimeout(autoSaveTimerRef.current);
       }
+      // 保留中の変更があれば即座に保存
+      if (hasPendingChangesRef.current) {
+        console.log('[LogCreateScreen] Flushing pending changes on unmount');
+        const data = formDataRef.current;
+        const targetDate = currentRecordedDateRef.current;
+        saveDailyConditionLog({
+          recordedDate: targetDate,
+          memo: data.memo,
+          headacheLevel: data.headache,
+          seizureLevel: data.seizure,
+          rightSideLevel: data.rightSide,
+          leftSideLevel: data.leftSide,
+          speechImpairmentLevel: data.speech,
+          memoryImpairmentLevel: data.memory,
+          physicalCondition: Math.max(0, Math.min(200, Number(data.physical) || 0)),
+          mentalCondition: Math.max(0, Math.min(200, Number(data.mental) || 0)),
+          bloodPressureSystolic: data.bpSys ? Number(data.bpSys) : null,
+          bloodPressureDiastolic: data.bpDia ? Number(data.bpDia) : null,
+        }).catch(err => console.error('[LogCreateScreen] Error flushing on unmount:', err));
+        hasPendingChangesRef.current = false;
+      }
     };
   }, []);
 
@@ -170,27 +207,49 @@ export default function LogCreateScreen() {
     }
 
     const targetDate = recordedDate;
+    
+    // フォーム値をrefに保存（アンマウント時のフラッシュ用）
+    formDataRef.current = {
+      memo,
+      headache,
+      seizure,
+      rightSide,
+      leftSide,
+      speech,
+      memory,
+      physical,
+      mental,
+      bpSys,
+      bpDia,
+    };
+    hasPendingChangesRef.current = true;
+    
     console.log('[LogCreateScreen] Scheduling auto-save for date:', targetDate);
-    autoSaveTimerRef.current = setTimeout(() => {
+    autoSaveTimerRef.current = setTimeout(async () => {
       // 再度日付を確認（日付が変更されていたら保存しない）
       if (currentRecordedDateRef.current !== targetDate) {
         console.log('[LogCreateScreen] Auto-save cancelled: date changed during delay');
         return;
       }
       console.log('[LogCreateScreen] Executing auto-save for date:', targetDate);
-      void doSave(targetDate, {
-        memo,
-        headache,
-        seizure,
-        rightSide,
-        leftSide,
-        speech,
-        memory,
-        physical,
-        mental,
-        bpSys,
-        bpDia,
-      });
+      try {
+        await doSave(targetDate, {
+          memo,
+          headache,
+          seizure,
+          rightSide,
+          leftSide,
+          speech,
+          memory,
+          physical,
+          mental,
+          bpSys,
+          bpDia,
+        });
+        hasPendingChangesRef.current = false;
+      } catch (err) {
+        console.error('[LogCreateScreen] Auto-save error:', err);
+      }
     }, 400);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
