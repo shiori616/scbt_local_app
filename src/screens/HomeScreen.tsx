@@ -9,6 +9,7 @@ import { Colors } from '../theme/colors';
 const LOGO_SOURCE = require('../../assets/logo.png');
 
 export default function HomeScreen() {
+  console.log('===== HomeScreen RENDER =====');
   const navigation = useNavigation<BottomTabNavigationProp<TabParamList>>();
 
   return (

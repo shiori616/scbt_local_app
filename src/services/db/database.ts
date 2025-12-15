@@ -1,67 +1,63 @@
 import { Platform } from 'react-native';
 
-// NOTE: Web では SQLite が未提供のため、DB 操作は no-op（必要に応じて localStorage 等に差し替え）
+// NOTE: Web では SQLite が未提供のため、DB 操作は localStorage に保存
 // ネイティブのみ動作させるため、expo-sqlite は動的 import し、web では読み込まない。
-let nativeDb: any | null = null;
-function getNativeDb() {
-  if (nativeDb) return nativeDb;
+
+let db: any = null;
+
+function getDb() {
+  if (db) {
+    console.log('[getDb] Returning cached database');
+    return db;
+  }
+  if (Platform.OS === 'web') {
+    console.log('[getDb] Web platform, returning null');
+    return null;
+  }
+  // expo-sqlite 14+ uses openDatabaseSync
+  console.log('[getDb] Opening database...');
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const SQLite = require('expo-sqlite');
-  nativeDb = SQLite.openDatabase('app.db');
-  return nativeDb;
-}
-
-type SQLResult = {
-  rowsAffected: number;
-  insertId?: number | null;
-  rows: {
-    length: number;
-    item: (index: number) => any;
-    _array: any[];
-  };
-};
-
-function executeSql(sql: string, params: any[] = []): Promise<SQLResult> {
-  return new Promise((resolve, reject) => {
-    const db = getNativeDb();
-    db.transaction(
-      tx => {
-        tx.executeSql(
-          sql,
-          params,
-          (_, result) => resolve(result as unknown as SQLResult),
-          (_, err) => {
-            reject(err);
-            return false;
-          }
-        );
-      },
-      reject
-    );
-  });
+  try {
+    db = SQLite.openDatabaseSync('app.db');
+    console.log('[getDb] Database opened successfully, available methods:', Object.keys(db || {}));
+    return db;
+  } catch (error) {
+    console.error('[getDb] Error opening database:', error);
+    return null;
+  }
 }
 
 export async function initDatabase(): Promise<void> {
+  console.log('[initDatabase] Starting initialization, Platform.OS:', Platform.OS);
   if (Platform.OS === 'web') {
-    // Web はスキップ（必要ならここで IndexedDB/localStorage へ移行実装）
+    console.log('[initDatabase] Skipping for web platform');
     return;
   }
-  // Create table with latest schema（ネイティブ）
-  await executeSql(`
+
+  const database = getDb();
+  if (!database) {
+    console.warn('[initDatabase] Database not available');
+    return;
+  }
+  console.log('[initDatabase] Database obtained, creating table...');
+
+  // Create table with latest schema
+  database.execSync(`
     CREATE TABLE IF NOT EXISTS user_daily_condition_logs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      recorded_date TEXT NOT NULL,
+      recorded_date TEXT NOT NULL UNIQUE,
       memo TEXT,
 
-      headache_level INTEGER NOT NULL,
-      seizure_level INTEGER NOT NULL,
-      right_side_level INTEGER NOT NULL,
-      left_side_level INTEGER NOT NULL,
-      speech_impairment_level INTEGER NOT NULL,
-      memory_impairment_level INTEGER NOT NULL,
+      headache_level INTEGER NOT NULL DEFAULT 5,
+      seizure_level INTEGER NOT NULL DEFAULT 5,
+      right_side_level INTEGER NOT NULL DEFAULT 5,
+      left_side_level INTEGER NOT NULL DEFAULT 5,
+      speech_impairment_level INTEGER NOT NULL DEFAULT 5,
+      memory_impairment_level INTEGER NOT NULL DEFAULT 5,
 
-      physical_condition INTEGER NOT NULL,
-      mental_condition INTEGER NOT NULL,
+      physical_condition INTEGER NOT NULL DEFAULT 100,
+      mental_condition INTEGER NOT NULL DEFAULT 100,
 
       blood_pressure_systolic INTEGER,
       blood_pressure_diastolic INTEGER,
@@ -70,32 +66,30 @@ export async function initDatabase(): Promise<void> {
       updated_at TEXT NOT NULL
     );
   `);
+  console.log('[initDatabase] Table created/verified');
 
-  // Add missing columns for existing installations
-  const info = await executeSql(`PRAGMA table_info(user_daily_condition_logs);`);
-  const existingColumns = new Set(
-    (info.rows?._array ?? []).map((r: any) => String(r.name))
-  );
-  if (!existingColumns.has('right_side_level')) {
-    await executeSql(
-      `ALTER TABLE user_daily_condition_logs ADD COLUMN right_side_level INTEGER;`
-    );
+  // Add missing columns for existing installations (ignore errors if column exists)
+  const columnsToAdd = [
+    { name: 'right_side_level', sql: 'ALTER TABLE user_daily_condition_logs ADD COLUMN right_side_level INTEGER DEFAULT 5' },
+    { name: 'left_side_level', sql: 'ALTER TABLE user_daily_condition_logs ADD COLUMN left_side_level INTEGER DEFAULT 5' },
+    { name: 'blood_pressure_systolic', sql: 'ALTER TABLE user_daily_condition_logs ADD COLUMN blood_pressure_systolic INTEGER' },
+    { name: 'blood_pressure_diastolic', sql: 'ALTER TABLE user_daily_condition_logs ADD COLUMN blood_pressure_diastolic INTEGER' },
+  ];
+
+  for (const col of columnsToAdd) {
+    try {
+      database.execSync(col.sql);
+      console.log('[initDatabase] Added column:', col.name);
+    } catch (e: any) {
+      // Ignore "duplicate column" errors
+      if (e?.message?.includes('duplicate column')) {
+        console.log('[initDatabase] Column already exists:', col.name);
+      } else {
+        console.warn('[initDatabase] Error adding column', col.name, ':', e);
+      }
+    }
   }
-  if (!existingColumns.has('left_side_level')) {
-    await executeSql(
-      `ALTER TABLE user_daily_condition_logs ADD COLUMN left_side_level INTEGER;`
-    );
-  }
-  if (!existingColumns.has('blood_pressure_systolic')) {
-    await executeSql(
-      `ALTER TABLE user_daily_condition_logs ADD COLUMN blood_pressure_systolic INTEGER;`
-    );
-  }
-  if (!existingColumns.has('blood_pressure_diastolic')) {
-    await executeSql(
-      `ALTER TABLE user_daily_condition_logs ADD COLUMN blood_pressure_diastolic INTEGER;`
-    );
-  }
+  console.log('[initDatabase] Initialization complete');
 }
 
 export type DailyConditionLog = {
@@ -151,29 +145,105 @@ export async function getDailyConditionLog(
   }
 
   await initDatabase();
-  const result = await executeSql(
-    `
-    SELECT
-      recorded_date,
-      memo,
-      headache_level,
-      seizure_level,
-      right_side_level,
-      left_side_level,
-      speech_impairment_level,
-      memory_impairment_level,
-      physical_condition,
-      mental_condition,
-      blood_pressure_systolic,
-      blood_pressure_diastolic
-    FROM user_daily_condition_logs
-    WHERE recorded_date = ?
-    LIMIT 1;
-    `,
-    [recordedDate]
-  );
-  if (result.rows.length === 0) return null;
-  const row = result.rows.item(0);
+  const database = getDb();
+  if (!database) {
+    console.warn('[getDailyConditionLog] Database not available');
+    return null;
+  }
+
+  let row: any = null;
+  try {
+    console.log('[getDailyConditionLog] Querying for date:', recordedDate);
+    
+    // expo-sqlite 16.xでは、getFirstSyncが存在する場合と存在しない場合がある
+    if (typeof database.getFirstSync === 'function') {
+      console.log('[getDailyConditionLog] Using getFirstSync');
+      row = database.getFirstSync(
+        `
+        SELECT
+          recorded_date,
+          memo,
+          headache_level,
+          seizure_level,
+          right_side_level,
+          left_side_level,
+          speech_impairment_level,
+          memory_impairment_level,
+          physical_condition,
+          mental_condition,
+          blood_pressure_systolic,
+          blood_pressure_diastolic
+        FROM user_daily_condition_logs
+        WHERE recorded_date = ?
+        LIMIT 1;
+        `,
+        [recordedDate]
+      );
+    } else if (typeof database.prepareSync === 'function') {
+      // getFirstSyncが存在しない場合は、prepareSyncとexecuteSyncを使う
+      console.log('[getDailyConditionLog] Using prepareSync/executeSync');
+      const stmt = database.prepareSync(
+        `
+        SELECT
+          recorded_date,
+          memo,
+          headache_level,
+          seizure_level,
+          right_side_level,
+          left_side_level,
+          speech_impairment_level,
+          memory_impairment_level,
+          physical_condition,
+          mental_condition,
+          blood_pressure_systolic,
+          blood_pressure_diastolic
+        FROM user_daily_condition_logs
+        WHERE recorded_date = ?
+        LIMIT 1;
+        `
+      );
+      stmt.bindSync([recordedDate]);
+      const result = stmt.executeSync();
+      console.log('[getDailyConditionLog] Query result type:', typeof result, 'isArray:', Array.isArray(result));
+      console.log('[getDailyConditionLog] Query result:', JSON.stringify(result));
+      
+      // executeSyncの戻り値は配列またはオブジェクトの可能性がある
+      if (result) {
+        if (Array.isArray(result)) {
+          if (result.length > 0) {
+            row = result[0];
+          }
+        } else if (typeof result === 'object') {
+          // オブジェクトの場合、直接使用
+          row = result;
+        } else if (result.getAll && typeof result.getAll === 'function') {
+          // getAllメソッドがある場合
+          const all = result.getAll();
+          if (all && all.length > 0) {
+            row = all[0];
+          }
+        } else if (result.getFirst && typeof result.getFirst === 'function') {
+          // getFirstメソッドがある場合
+          row = result.getFirst();
+        }
+      }
+      stmt.finalizeSync();
+    } else {
+      console.error('[getDailyConditionLog] No supported API found');
+      return null;
+    }
+    
+    console.log('[getDailyConditionLog] Row found:', row);
+  } catch (error) {
+    console.error('[getDailyConditionLog] Error getting daily condition log:', error);
+    return null;
+  }
+
+  if (!row) {
+    console.log('[getDailyConditionLog] No row found for date:', recordedDate);
+    return null;
+  }
+
   return {
     recordedDate,
     memo: row.memo ?? null,
@@ -212,38 +282,107 @@ export async function saveDailyConditionLog(log: DailyConditionLog): Promise<voi
   }
 
   await initDatabase();
+  const database = getDb();
+  if (!database) return;
 
   const nowIso = new Date().toISOString();
 
-  // Check if record exists for recorded_date
-  const select = await executeSql(
-    `SELECT id FROM user_daily_condition_logs WHERE recorded_date = ? LIMIT 1;`,
-    [log.recordedDate]
-  );
-  const existingId: number | undefined =
-    select.rows.length > 0 ? select.rows.item(0).id : undefined;
+  console.log('[saveDailyConditionLog] Saving data for date:', log.recordedDate, log);
 
-  if (existingId != null) {
-    // UPDATE existing
-    await executeSql(
-      `
-      UPDATE user_daily_condition_logs
-      SET
-        memo = ?,
-        headache_level = ?,
-        seizure_level = ?,
-        right_side_level = ?,
-        left_side_level = ?,
-        speech_impairment_level = ?,
-        memory_impairment_level = ?,
-        physical_condition = ?,
-        mental_condition = ?,
-        blood_pressure_systolic = ?,
-        blood_pressure_diastolic = ?,
-        updated_at = ?
-      WHERE id = ?;
-      `,
-      [
+  // Use INSERT OR REPLACE (UPSERT) since recorded_date is UNIQUE
+  try {
+    if (typeof database.runSync === 'function') {
+      console.log('[saveDailyConditionLog] Using runSync');
+      database.runSync(
+        `
+        INSERT INTO user_daily_condition_logs (
+          recorded_date,
+          memo,
+          headache_level,
+          seizure_level,
+          right_side_level,
+          left_side_level,
+          speech_impairment_level,
+          memory_impairment_level,
+          physical_condition,
+          mental_condition,
+          blood_pressure_systolic,
+          blood_pressure_diastolic,
+          created_at,
+          updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(recorded_date) DO UPDATE SET
+          memo = excluded.memo,
+          headache_level = excluded.headache_level,
+          seizure_level = excluded.seizure_level,
+          right_side_level = excluded.right_side_level,
+          left_side_level = excluded.left_side_level,
+          speech_impairment_level = excluded.speech_impairment_level,
+          memory_impairment_level = excluded.memory_impairment_level,
+          physical_condition = excluded.physical_condition,
+          mental_condition = excluded.mental_condition,
+          blood_pressure_systolic = excluded.blood_pressure_systolic,
+          blood_pressure_diastolic = excluded.blood_pressure_diastolic,
+          updated_at = excluded.updated_at;
+        `,
+        [
+          log.recordedDate,
+          log.memo ?? null,
+          log.headacheLevel,
+          log.seizureLevel,
+          log.rightSideLevel,
+          log.leftSideLevel,
+          log.speechImpairmentLevel,
+          log.memoryImpairmentLevel,
+          log.physicalCondition,
+          log.mentalCondition,
+          log.bloodPressureSystolic ?? null,
+          log.bloodPressureDiastolic ?? null,
+          nowIso,
+          nowIso,
+        ]
+      );
+      console.log('[saveDailyConditionLog] Data saved successfully with runSync');
+    } else if (typeof database.prepareSync === 'function') {
+      // runSyncが存在しない場合は、prepareSyncとexecuteSyncを使う
+      console.log('[saveDailyConditionLog] Using prepareSync/executeSync');
+      const stmt = database.prepareSync(
+        `
+        INSERT INTO user_daily_condition_logs (
+          recorded_date,
+          memo,
+          headache_level,
+          seizure_level,
+          right_side_level,
+          left_side_level,
+          speech_impairment_level,
+          memory_impairment_level,
+          physical_condition,
+          mental_condition,
+          blood_pressure_systolic,
+          blood_pressure_diastolic,
+          created_at,
+          updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(recorded_date) DO UPDATE SET
+          memo = excluded.memo,
+          headache_level = excluded.headache_level,
+          seizure_level = excluded.seizure_level,
+          right_side_level = excluded.right_side_level,
+          left_side_level = excluded.left_side_level,
+          speech_impairment_level = excluded.speech_impairment_level,
+          memory_impairment_level = excluded.memory_impairment_level,
+          physical_condition = excluded.physical_condition,
+          mental_condition = excluded.mental_condition,
+          blood_pressure_systolic = excluded.blood_pressure_systolic,
+          blood_pressure_diastolic = excluded.blood_pressure_diastolic,
+          updated_at = excluded.updated_at;
+        `
+      );
+      stmt.bindSync([
+        log.recordedDate,
         log.memo ?? null,
         log.headacheLevel,
         log.seizureLevel,
@@ -256,50 +395,19 @@ export async function saveDailyConditionLog(log: DailyConditionLog): Promise<voi
         log.bloodPressureSystolic ?? null,
         log.bloodPressureDiastolic ?? null,
         nowIso,
-        existingId,
-      ]
-    );
-    return;
+        nowIso,
+      ]);
+      stmt.executeSync();
+      stmt.finalizeSync();
+      console.log('[saveDailyConditionLog] Data saved successfully with prepareSync/executeSync');
+    } else {
+      console.error('[saveDailyConditionLog] No supported API found');
+      throw new Error('No supported database API found');
+    }
+  } catch (error) {
+    console.error('[saveDailyConditionLog] Error saving daily condition log:', error);
+    throw error;
   }
-
-  // INSERT new
-  await executeSql(
-    `
-    INSERT INTO user_daily_condition_logs (
-      recorded_date,
-      memo,
-      headache_level,
-      seizure_level,
-      right_side_level,
-      left_side_level,
-      speech_impairment_level,
-      memory_impairment_level,
-      physical_condition,
-      mental_condition,
-      blood_pressure_systolic,
-      blood_pressure_diastolic,
-      created_at,
-      updated_at
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-    `,
-    [
-      log.recordedDate,
-      log.memo ?? null,
-      log.headacheLevel,
-      log.seizureLevel,
-      log.rightSideLevel,
-      log.leftSideLevel,
-      log.speechImpairmentLevel,
-      log.memoryImpairmentLevel,
-      log.physicalCondition,
-      log.mentalCondition,
-      log.bloodPressureSystolic ?? null,
-      log.bloodPressureDiastolic ?? null,
-      nowIso,
-      nowIso,
-    ]
-  );
 }
 
 // Utility: 指定範囲の日付について、未記録ならデフォルト値で作成
@@ -338,5 +446,3 @@ export async function ensureDefaultLogsForPastYear(): Promise<void> {
   lastYear.setFullYear(today.getFullYear() - 1);
   await ensureDefaultLogsForRange(lastYear, today);
 }
-
-

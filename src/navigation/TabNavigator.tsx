@@ -18,6 +18,7 @@ export type TabParamList = {
 const Tab = createBottomTabNavigator<TabParamList>();
 
 export default function TabNavigator() {
+  console.log('===== TabNavigator RENDER =====');
   return (
     <Tab.Navigator
       screenOptions={{

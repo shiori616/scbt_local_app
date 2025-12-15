@@ -14,6 +14,7 @@ export type SeizureStackParamList = {
 const Stack = createNativeStackNavigator<SeizureStackParamList>();
 
 export default function SeizureStackNavigator() {
+  console.log('===== SeizureStackNavigator RENDER =====');
   return (
     <Stack.Navigator
       initialRouteName="LogCreate"

@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState, useEffect } from 'react';
+import React, { useMemo, useRef, useState, useEffect, useCallback } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Colors } from '../theme/colors';
 import { getDailyConditionLog, saveDailyConditionLog } from '../services/db/database';
@@ -58,9 +58,11 @@ function LevelPicker({
 }
 
 export default function LogCreateScreen() {
-  const jpToday = useMemo(() => formatJpDate(new Date()), []);
+  console.log('===== LogCreateScreen RENDER =====');
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
   const recordedDate = useMemo(() => toIsoDate(currentDate), [currentDate]);
+  
+  console.log('[LogCreateScreen] Initial recordedDate:', recordedDate);
 
   // ラベル最大幅を測定して、右端を基準に全行の配置をそろえる
   const [labelMaxWidth, setLabelMaxWidth] = useState(0);
@@ -93,59 +95,105 @@ export default function LogCreateScreen() {
   const [bpDia, setBpDia] = useState<string>('');
   const [memo, setMemo] = useState<string>('');
 
+  // データロード中かどうか（ロード中は自動保存をスキップ）
+  const [isLoading, setIsLoading] = useState(true);
+  // 初回ロード完了したかどうか
+  const hasInitializedRef = useRef(false);
+  // 現在表示中の日付を追跡
+  const currentRecordedDateRef = useRef(recordedDate);
+
   // 変更があれば自動保存（デバウンス）
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const scheduleAutoSave = () => {
-    if (autoSaveTimerRef.current) {
-      clearTimeout(autoSaveTimerRef.current);
-    }
-    autoSaveTimerRef.current = setTimeout(() => {
-      void saveDailyConditionLog({
-        recordedDate,
-        memo,
-        headacheLevel: headache,
-        seizureLevel: seizure,
-        rightSideLevel: rightSide,
-        leftSideLevel: leftSide,
-        speechImpairmentLevel: speech,
-        memoryImpairmentLevel: memory,
-        physicalCondition: Math.max(0, Math.min(200, Number(physical) || 0)),
-        mentalCondition: Math.max(0, Math.min(200, Number(mental) || 0)),
-        bloodPressureSystolic: bpSys ? Number(bpSys) : null,
-        bloodPressureDiastolic: bpDia ? Number(bpDia) : null,
-      });
-    }, 400);
-  };
+
+  const doSave = useCallback(async (targetDate: string, data: {
+    memo: string;
+    headache: number;
+    seizure: number;
+    rightSide: number;
+    leftSide: number;
+    speech: number;
+    memory: number;
+    physical: number;
+    mental: number;
+    bpSys: string;
+    bpDia: string;
+  }) => {
+    await saveDailyConditionLog({
+      recordedDate: targetDate,
+      memo: data.memo,
+      headacheLevel: data.headache,
+      seizureLevel: data.seizure,
+      rightSideLevel: data.rightSide,
+      leftSideLevel: data.leftSide,
+      speechImpairmentLevel: data.speech,
+      memoryImpairmentLevel: data.memory,
+      physicalCondition: Math.max(0, Math.min(200, Number(data.physical) || 0)),
+      mentalCondition: Math.max(0, Math.min(200, Number(data.mental) || 0)),
+      bloodPressureSystolic: data.bpSys ? Number(data.bpSys) : null,
+      bloodPressureDiastolic: data.bpDia ? Number(data.bpDia) : null,
+    });
+  }, []);
 
   // アンマウント時に未実行の保存をフラッシュ
   useEffect(() => {
     return () => {
       if (autoSaveTimerRef.current) {
         clearTimeout(autoSaveTimerRef.current);
-        void saveDailyConditionLog({
-          recordedDate,
-          memo,
-          headacheLevel: headache,
-          seizureLevel: seizure,
-          rightSideLevel: rightSide,
-          leftSideLevel: leftSide,
-          speechImpairmentLevel: speech,
-          memoryImpairmentLevel: memory,
-          physicalCondition: Math.max(0, Math.min(200, Number(physical) || 0)),
-          mentalCondition: Math.max(0, Math.min(200, Number(mental) || 0)),
-          bloodPressureSystolic: bpSys ? Number(bpSys) : null,
-          bloodPressureDiastolic: bpDia ? Number(bpDia) : null,
-        });
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // フォーム値変更時の自動保存（ロード中はスキップ、日付変更時もスキップ）
   useEffect(() => {
-    scheduleAutoSave();
+    // まだ初期化されていない場合はスキップ
+    if (!hasInitializedRef.current) {
+      console.log('[LogCreateScreen] Auto-save skipped: not initialized');
+      return;
+    }
+    // ロード中は保存しない
+    if (isLoading) {
+      console.log('[LogCreateScreen] Auto-save skipped: loading');
+      return;
+    }
+
+    // 現在の日付と一致しているか確認
+    if (currentRecordedDateRef.current !== recordedDate) {
+      console.log('[LogCreateScreen] Auto-save skipped: date mismatch', {
+        current: currentRecordedDateRef.current,
+        recorded: recordedDate,
+      });
+      return;
+    }
+
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+    }
+
+    const targetDate = recordedDate;
+    console.log('[LogCreateScreen] Scheduling auto-save for date:', targetDate);
+    autoSaveTimerRef.current = setTimeout(() => {
+      // 再度日付を確認（日付が変更されていたら保存しない）
+      if (currentRecordedDateRef.current !== targetDate) {
+        console.log('[LogCreateScreen] Auto-save cancelled: date changed during delay');
+        return;
+      }
+      console.log('[LogCreateScreen] Executing auto-save for date:', targetDate);
+      void doSave(targetDate, {
+        memo,
+        headache,
+        seizure,
+        rightSide,
+        leftSide,
+        speech,
+        memory,
+        physical,
+        mental,
+        bpSys,
+        bpDia,
+      });
+    }, 400);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    recordedDate,
     headache,
     seizure,
     rightSide,
@@ -157,71 +205,91 @@ export default function LogCreateScreen() {
     bpSys,
     bpDia,
     memo,
+    isLoading,
+    recordedDate,
   ]);
 
   // 日付変更時にデータを読み込み
-  React.useEffect(() => {
-    (async () => {
-      const loaded = await getDailyConditionLog(recordedDate);
-      if (!loaded) {
-        // デフォルトにリセット（5段階=5、200段階=100、血圧は空欄）
-        const defaults = {
-          headache: 5,
-          seizure: 5,
-          rightSide: 5,
-          leftSide: 5,
-          speech: 5,
-          memory: 5,
-          physical: 100,
-          mental: 100,
-          bpSys: '',
-          bpDia: '',
-          memoText: '',
-        };
-        setHeadache(defaults.headache);
-        setSeizure(defaults.seizure);
-        setRightSide(defaults.rightSide);
-        setLeftSide(defaults.leftSide);
-        setSpeech(defaults.speech);
-        setMemory(defaults.memory);
-        setPhysical(defaults.physical);
-        setMental(defaults.mental);
-        setBpSys(defaults.bpSys);
-        setBpDia(defaults.bpDia);
-        setMemo(defaults.memoText);
-        // まだデータが無い日は、表示中のデフォルト値で即時作成する
-        await saveDailyConditionLog({
-          recordedDate,
-          memo: defaults.memoText,
-          headacheLevel: defaults.headache,
-          seizureLevel: defaults.seizure,
-          rightSideLevel: defaults.rightSide,
-          leftSideLevel: defaults.leftSide,
-          speechImpairmentLevel: defaults.speech,
-          memoryImpairmentLevel: defaults.memory,
-          physicalCondition: defaults.physical,
-          mentalCondition: defaults.mental,
-          bloodPressureSystolic: null,
-          bloodPressureDiastolic: null,
-        });
-        return;
+  useEffect(() => {
+    console.log('[LogCreateScreen] useEffect triggered for recordedDate:', recordedDate);
+    let isCancelled = false;
+
+    const loadData = async () => {
+      console.log('[LogCreateScreen] loadData started for date:', recordedDate);
+      // 前回のタイマーをキャンセル
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = null;
       }
-      setHeadache(loaded.headacheLevel ?? 1);
-      setSeizure(loaded.seizureLevel ?? 1);
-      setRightSide(loaded.rightSideLevel ?? 1);
-      setLeftSide(loaded.leftSideLevel ?? 1);
-      setSpeech(loaded.speechImpairmentLevel ?? 1);
-      setMemory(loaded.memoryImpairmentLevel ?? 1);
-      setPhysical(loaded.physicalCondition ?? 100);
-      setMental(loaded.mentalCondition ?? 100);
-      setBpSys(
-        loaded.bloodPressureSystolic != null ? String(loaded.bloodPressureSystolic) : ''
-      );
-      setBpDia(
-        loaded.bloodPressureDiastolic != null ? String(loaded.bloodPressureDiastolic) : ''
-      );
-      setMemo(loaded.memo ?? '');
-    })();
+
+      // 即座にフォームをリセット（前の日付のデータが残らないように）
+      console.log('[LogCreateScreen] Resetting form to defaults');
+      setIsLoading(true);
+      setHeadache(5);
+      setSeizure(5);
+      setRightSide(5);
+      setLeftSide(5);
+      setSpeech(5);
+      setMemory(5);
+      setPhysical(100);
+      setMental(100);
+      setBpSys('');
+      setBpDia('');
+      setMemo('');
+
+      currentRecordedDateRef.current = recordedDate;
+
+      try {
+        console.log('[LogCreateScreen] Loading data for date:', recordedDate);
+        const loaded = await getDailyConditionLog(recordedDate);
+        console.log('[LogCreateScreen] Loaded data:', loaded);
+
+        // キャンセルされた場合（日付が変わった場合）は何もしない
+        if (isCancelled) {
+          console.log('[LogCreateScreen] Load cancelled, date changed');
+          return;
+        }
+
+        // データが存在する場合は、そのデータを表示
+        if (loaded) {
+          console.log('[LogCreateScreen] Setting loaded data to form');
+          setHeadache(loaded.headacheLevel ?? 5);
+          setSeizure(loaded.seizureLevel ?? 5);
+          setRightSide(loaded.rightSideLevel ?? 5);
+          setLeftSide(loaded.leftSideLevel ?? 5);
+          setSpeech(loaded.speechImpairmentLevel ?? 5);
+          setMemory(loaded.memoryImpairmentLevel ?? 5);
+          setPhysical(loaded.physicalCondition ?? 100);
+          setMental(loaded.mentalCondition ?? 100);
+          setBpSys(
+            loaded.bloodPressureSystolic != null ? String(loaded.bloodPressureSystolic) : ''
+          );
+          setBpDia(
+            loaded.bloodPressureDiastolic != null ? String(loaded.bloodPressureDiastolic) : ''
+          );
+          setMemo(loaded.memo ?? '');
+          console.log('[LogCreateScreen] Form values updated');
+        } else {
+          console.log('[LogCreateScreen] No data found, using defaults');
+        }
+        // データが存在しない場合は、既にデフォルト値が設定されているので何もしない
+      } catch (error) {
+        console.error('[LogCreateScreen] Error loading daily condition log:', error);
+        // エラー時もデフォルト値のまま
+      } finally {
+        if (!isCancelled) {
+          setIsLoading(false);
+          hasInitializedRef.current = true;
+          console.log('[LogCreateScreen] Loading completed');
+        }
+      }
+    };
+
+    loadData();
+
+    return () => {
+      isCancelled = true;
+    };
   }, [recordedDate]);
   const handleSave = async () => {
     try {
@@ -248,13 +316,25 @@ export default function LogCreateScreen() {
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <View style={styles.dateHeader}>
-        <Pressable onPress={() => setCurrentDate(new Date(currentDate.getTime() - 86400000))}>
+        <Pressable
+          onPress={() => {
+            const newDate = new Date(currentDate.getTime() - 86400000);
+            console.log('[LogCreateScreen] Previous date button pressed, new date:', toIsoDate(newDate));
+            setCurrentDate(newDate);
+          }}
+        >
           <Text style={styles.dateArrow}>{'‹'}</Text>
         </Pressable>
         <View style={styles.dateCenter}>
           <Text style={styles.dateText}>{formatJpDate(currentDate)}</Text>
         </View>
-        <Pressable onPress={() => setCurrentDate(new Date(currentDate.getTime() + 86400000))}>
+        <Pressable
+          onPress={() => {
+            const newDate = new Date(currentDate.getTime() + 86400000);
+            console.log('[LogCreateScreen] Next date button pressed, new date:', toIsoDate(newDate));
+            setCurrentDate(newDate);
+          }}
+        >
           <Text style={styles.dateArrow}>{'›'}</Text>
         </Pressable>
       </View>
