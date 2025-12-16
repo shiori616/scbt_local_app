@@ -68,6 +68,21 @@ export async function initDatabase(): Promise<void> {
   `);
   console.log('[initDatabase] Table created/verified');
 
+  // 服用薬テーブルを作成
+  database.execSync(`
+    CREATE TABLE IF NOT EXISTS medications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      medication_name TEXT NOT NULL,
+      dosage TEXT,
+      intake_timing INTEGER NOT NULL,
+      start_date INTEGER,
+      end_date INTEGER,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+  console.log('[initDatabase] Medications table created/verified');
+
   // Add missing columns for existing installations (ignore errors if column exists)
   const columnsToAdd = [
     { name: 'right_side_level', sql: 'ALTER TABLE user_daily_condition_logs ADD COLUMN right_side_level INTEGER DEFAULT 5' },
@@ -108,6 +123,33 @@ export type DailyConditionLog = {
 
   bloodPressureSystolic?: number | null;
   bloodPressureDiastolic?: number | null;
+};
+
+// 服用タイミングの定義
+export const INTAKE_TIMINGS = [
+  { id: 1, key: 'morning', label: '朝' },
+  { id: 2, key: 'morning_before_meal', label: '朝食前' },
+  { id: 3, key: 'morning_after_meal', label: '朝食後' },
+  { id: 4, key: 'noon', label: '昼' },
+  { id: 5, key: 'noon_before_meal', label: '昼食前' },
+  { id: 6, key: 'noon_after_meal', label: '昼食後' },
+  { id: 7, key: 'evening', label: '夜' },
+  { id: 8, key: 'evening_before_meal', label: '夕食前' },
+  { id: 9, key: 'evening_after_meal', label: '夕食後' },
+  { id: 10, key: 'bedtime', label: '就寝前' },
+  { id: 11, key: 'between_meals', label: '食間' },
+  { id: 12, key: 'as_needed', label: '頓服' },
+  { id: 13, key: 'multiple_times', label: '1日数回' },
+  { id: 14, key: 'fixed_time', label: '時刻指定' },
+] as const;
+
+export type Medication = {
+  id?: number;
+  medicationName: string;
+  dosage?: string | null;
+  intakeTiming: number;
+  startDate?: number | null;  // YYYYMMDD
+  endDate?: number | null;    // YYYYMMDD
 };
 
 export async function getDailyConditionLog(
@@ -597,4 +639,204 @@ export async function ensureDefaultLogsForPastYear(): Promise<void> {
   const lastYear = new Date(today);
   lastYear.setFullYear(today.getFullYear() - 1);
   await ensureDefaultLogsForRange(lastYear, today);
+}
+
+// ============= 服用薬関連の関数 =============
+
+// 服用薬一覧を取得
+export async function getMedications(): Promise<Medication[]> {
+  if (Platform.OS === 'web') {
+    try {
+      const raw = localStorage.getItem('medications');
+      if (!raw) return [];
+      return JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  }
+
+  await initDatabase();
+  const database = getDb();
+  if (!database) {
+    console.warn('[getMedications] Database not available');
+    return [];
+  }
+
+  try {
+    let rows: any[] = [];
+    if (typeof database.getAllSync === 'function') {
+      rows = database.getAllSync(`
+        SELECT id, medication_name, dosage, intake_timing, start_date, end_date
+        FROM medications
+        ORDER BY id DESC;
+      `);
+    } else if (typeof database.prepareSync === 'function') {
+      const stmt = database.prepareSync(`
+        SELECT id, medication_name, dosage, intake_timing, start_date, end_date
+        FROM medications
+        ORDER BY id DESC;
+      `);
+      const result = stmt.executeSync();
+      if (result && result.getAll) {
+        rows = result.getAll();
+      }
+      stmt.finalizeSync();
+    }
+
+    return rows.map((row: any) => ({
+      id: row.id,
+      medicationName: row.medication_name,
+      dosage: row.dosage ?? null,
+      intakeTiming: row.intake_timing,
+      startDate: row.start_date ?? null,
+      endDate: row.end_date ?? null,
+    }));
+  } catch (error) {
+    console.error('[getMedications] Error:', error);
+    return [];
+  }
+}
+
+// 服用薬を保存（新規追加または更新）
+export async function saveMedication(medication: Medication): Promise<void> {
+  if (Platform.OS === 'web') {
+    try {
+      const existing = await getMedications();
+      if (medication.id) {
+        const idx = existing.findIndex(m => m.id === medication.id);
+        if (idx >= 0) {
+          existing[idx] = medication;
+        }
+      } else {
+        const maxId = existing.reduce((max, m) => Math.max(max, m.id || 0), 0);
+        medication.id = maxId + 1;
+        existing.unshift(medication);
+      }
+      localStorage.setItem('medications', JSON.stringify(existing));
+    } catch (error) {
+      console.error('[saveMedication] Web error:', error);
+    }
+    return;
+  }
+
+  await initDatabase();
+  const database = getDb();
+  if (!database) {
+    console.warn('[saveMedication] Database not available');
+    return;
+  }
+
+  const nowIso = new Date().toISOString();
+
+  try {
+    if (medication.id) {
+      // 更新
+      if (typeof database.runSync === 'function') {
+        database.runSync(
+          `UPDATE medications 
+           SET medication_name = ?, dosage = ?, intake_timing = ?, start_date = ?, end_date = ?, updated_at = ?
+           WHERE id = ?`,
+          [
+            medication.medicationName,
+            medication.dosage ?? null,
+            medication.intakeTiming,
+            medication.startDate ?? null,
+            medication.endDate ?? null,
+            nowIso,
+            medication.id,
+          ]
+        );
+      } else if (typeof database.prepareSync === 'function') {
+        const stmt = database.prepareSync(
+          `UPDATE medications 
+           SET medication_name = ?, dosage = ?, intake_timing = ?, start_date = ?, end_date = ?, updated_at = ?
+           WHERE id = ?`
+        );
+        stmt.bindSync([
+          medication.medicationName,
+          medication.dosage ?? null,
+          medication.intakeTiming,
+          medication.startDate ?? null,
+          medication.endDate ?? null,
+          nowIso,
+          medication.id,
+        ]);
+        stmt.executeSync();
+        stmt.finalizeSync();
+      }
+    } else {
+      // 新規追加
+      if (typeof database.runSync === 'function') {
+        database.runSync(
+          `INSERT INTO medications (medication_name, dosage, intake_timing, start_date, end_date, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [
+            medication.medicationName,
+            medication.dosage ?? null,
+            medication.intakeTiming,
+            medication.startDate ?? null,
+            medication.endDate ?? null,
+            nowIso,
+            nowIso,
+          ]
+        );
+      } else if (typeof database.prepareSync === 'function') {
+        const stmt = database.prepareSync(
+          `INSERT INTO medications (medication_name, dosage, intake_timing, start_date, end_date, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
+        );
+        stmt.bindSync([
+          medication.medicationName,
+          medication.dosage ?? null,
+          medication.intakeTiming,
+          medication.startDate ?? null,
+          medication.endDate ?? null,
+          nowIso,
+          nowIso,
+        ]);
+        stmt.executeSync();
+        stmt.finalizeSync();
+      }
+    }
+    console.log('[saveMedication] Medication saved successfully');
+  } catch (error) {
+    console.error('[saveMedication] Error:', error);
+    throw error;
+  }
+}
+
+// 服用薬を削除
+export async function deleteMedication(id: number): Promise<void> {
+  if (Platform.OS === 'web') {
+    try {
+      const existing = await getMedications();
+      const filtered = existing.filter(m => m.id !== id);
+      localStorage.setItem('medications', JSON.stringify(filtered));
+    } catch (error) {
+      console.error('[deleteMedication] Web error:', error);
+    }
+    return;
+  }
+
+  await initDatabase();
+  const database = getDb();
+  if (!database) {
+    console.warn('[deleteMedication] Database not available');
+    return;
+  }
+
+  try {
+    if (typeof database.runSync === 'function') {
+      database.runSync('DELETE FROM medications WHERE id = ?', [id]);
+    } else if (typeof database.prepareSync === 'function') {
+      const stmt = database.prepareSync('DELETE FROM medications WHERE id = ?');
+      stmt.bindSync([id]);
+      stmt.executeSync();
+      stmt.finalizeSync();
+    }
+    console.log('[deleteMedication] Medication deleted successfully');
+  } catch (error) {
+    console.error('[deleteMedication] Error:', error);
+    throw error;
+  }
 }
