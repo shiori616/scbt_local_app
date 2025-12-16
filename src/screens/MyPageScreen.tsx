@@ -3,6 +3,7 @@ import {
   Alert,
   FlatList,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -20,14 +21,29 @@ import {
 } from '../services/db/database';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
+import { Picker } from '@react-native-picker/picker';
+import DateTimePicker from '@react-native-community/datetimepicker';
 
 // 日付をYYYYMMDD形式に変換
-function dateToNumber(date: Date): number {
+function dateToNumber(date: Date | null | undefined): number | null {
+  if (!date) return null;
   return (
     date.getFullYear() * 10000 +
     (date.getMonth() + 1) * 100 +
     date.getDate()
   );
+}
+
+// YYYYMMDD形式をDateオブジェクトに変換
+function numberToDate(num: number | null | undefined): Date | null {
+  if (!num) return null;
+  const str = String(num);
+  if (str.length !== 8) return null;
+  const year = parseInt(str.slice(0, 4), 10);
+  const month = parseInt(str.slice(4, 6), 10) - 1;
+  const day = parseInt(str.slice(6, 8), 10);
+  if (isNaN(year) || isNaN(month) || isNaN(day)) return null;
+  return new Date(year, month, day);
 }
 
 // YYYYMMDD形式を表示用文字列に変換
@@ -36,6 +52,15 @@ function formatDateNumber(num: number | null | undefined): string {
   const str = String(num);
   if (str.length !== 8) return '-';
   return `${str.slice(0, 4)}/${str.slice(4, 6)}/${str.slice(6, 8)}`;
+}
+
+// Dateを表示用文字列に変換
+function formatDate(date: Date | null | undefined): string {
+  if (!date) return '-';
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}/${month}/${day}`;
 }
 
 // 服用タイミングのIDからラベルを取得
@@ -53,8 +78,12 @@ export default function MyPageScreen() {
   const [medicationName, setMedicationName] = useState('');
   const [dosage, setDosage] = useState('');
   const [intakeTiming, setIntakeTiming] = useState(1);
-  const [startDateStr, setStartDateStr] = useState('');
-  const [endDateStr, setEndDateStr] = useState('');
+  const [startDate, setStartDate] = useState<Date | null>(null);
+  const [endDate, setEndDate] = useState<Date | null>(null);
+  
+  // 日付ピッカーの表示状態
+  const [showStartDatePicker, setShowStartDatePicker] = useState(false);
+  const [showEndDatePicker, setShowEndDatePicker] = useState(false);
 
   // データ読み込み
   const loadMedications = useCallback(async () => {
@@ -78,8 +107,10 @@ export default function MyPageScreen() {
     setMedicationName('');
     setDosage('');
     setIntakeTiming(1);
-    setStartDateStr('');
-    setEndDateStr('');
+    setStartDate(null);
+    setEndDate(null);
+    setShowStartDatePicker(false);
+    setShowEndDatePicker(false);
     setIsModalVisible(true);
   };
 
@@ -89,8 +120,10 @@ export default function MyPageScreen() {
     setMedicationName(med.medicationName);
     setDosage(med.dosage ?? '');
     setIntakeTiming(med.intakeTiming);
-    setStartDateStr(med.startDate ? String(med.startDate) : '');
-    setEndDateStr(med.endDate ? String(med.endDate) : '');
+    setStartDate(numberToDate(med.startDate));
+    setEndDate(numberToDate(med.endDate));
+    setShowStartDatePicker(false);
+    setShowEndDatePicker(false);
     setIsModalVisible(true);
   };
 
@@ -98,17 +131,6 @@ export default function MyPageScreen() {
   const closeModal = () => {
     setIsModalVisible(false);
     setEditingMedication(null);
-  };
-
-  // 日付文字列をYYYYMMDD数値に変換
-  const parseDateString = (str: string): number | null => {
-    if (!str) return null;
-    // YYYYMMDD, YYYY/MM/DD, YYYY-MM-DD などに対応
-    const cleaned = str.replace(/[\/\-]/g, '');
-    if (cleaned.length !== 8) return null;
-    const num = parseInt(cleaned, 10);
-    if (isNaN(num)) return null;
-    return num;
   };
 
   // 保存
@@ -123,8 +145,8 @@ export default function MyPageScreen() {
       medicationName: medicationName.trim(),
       dosage: dosage.trim() || null,
       intakeTiming,
-      startDate: parseDateString(startDateStr),
-      endDate: parseDateString(endDateStr),
+      startDate: dateToNumber(startDate),
+      endDate: dateToNumber(endDate),
     };
 
     try {
@@ -133,6 +155,25 @@ export default function MyPageScreen() {
       closeModal();
     } catch (error) {
       Alert.alert('エラー', '保存に失敗しました');
+    }
+  };
+  
+  // 日付ピッカーのハンドラー
+  const handleStartDateChange = (event: any, selectedDate?: Date) => {
+    if (Platform.OS === 'android') {
+      setShowStartDatePicker(false);
+    }
+    if (selectedDate) {
+      setStartDate(selectedDate);
+    }
+  };
+  
+  const handleEndDateChange = (event: any, selectedDate?: Date) => {
+    if (Platform.OS === 'android') {
+      setShowEndDatePicker(false);
+    }
+    if (selectedDate) {
+      setEndDate(selectedDate);
     }
   };
 
@@ -260,51 +301,63 @@ export default function MyPageScreen() {
 
               {/* 服用タイミング */}
               <Text style={styles.inputLabel}>服用タイミング *</Text>
-              <View style={styles.timingGrid}>
-                {INTAKE_TIMINGS.map((timing) => (
-                  <Pressable
-                    key={timing.id}
-                    style={[
-                      styles.timingBtn,
-                      intakeTiming === timing.id && styles.timingBtnActive,
-                    ]}
-                    onPress={() => setIntakeTiming(timing.id)}
-                  >
-                    <Text
-                      style={[
-                        styles.timingBtnText,
-                        intakeTiming === timing.id && styles.timingBtnTextActive,
-                      ]}
-                    >
-                      {timing.label}
-                    </Text>
-                  </Pressable>
-                ))}
+              <View style={styles.pickerContainer}>
+                <Picker
+                  selectedValue={intakeTiming}
+                  onValueChange={(value) => setIntakeTiming(value)}
+                  style={styles.picker}
+                >
+                  {INTAKE_TIMINGS.map((timing) => (
+                    <Picker.Item
+                      key={timing.id}
+                      label={timing.label}
+                      value={timing.id}
+                    />
+                  ))}
+                </Picker>
               </View>
 
               {/* 開始日 */}
               <Text style={styles.inputLabel}>服用開始日</Text>
-              <TextInput
-                style={styles.textInput}
-                value={startDateStr}
-                onChangeText={setStartDateStr}
-                placeholder="YYYYMMDD（例: 20241215）"
-                placeholderTextColor={Colors.grayBlue}
-                keyboardType="number-pad"
-                maxLength={8}
-              />
+              <Pressable
+                style={styles.datePickerButton}
+                onPress={() => setShowStartDatePicker(true)}
+              >
+                <Text style={[styles.datePickerText, !startDate && styles.datePickerPlaceholder]}>
+                  {startDate ? formatDate(startDate) : '日付を選択'}
+                </Text>
+                <Ionicons name="calendar-outline" size={20} color={Colors.deepNeuroBlue} />
+              </Pressable>
+              {showStartDatePicker && (
+                <DateTimePicker
+                  value={startDate || new Date()}
+                  mode="date"
+                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                  onChange={handleStartDateChange}
+                  maximumDate={endDate || undefined}
+                />
+              )}
 
               {/* 終了日 */}
               <Text style={styles.inputLabel}>服用終了日</Text>
-              <TextInput
-                style={styles.textInput}
-                value={endDateStr}
-                onChangeText={setEndDateStr}
-                placeholder="YYYYMMDD（例: 20251215）"
-                placeholderTextColor={Colors.grayBlue}
-                keyboardType="number-pad"
-                maxLength={8}
-              />
+              <Pressable
+                style={styles.datePickerButton}
+                onPress={() => setShowEndDatePicker(true)}
+              >
+                <Text style={[styles.datePickerText, !endDate && styles.datePickerPlaceholder]}>
+                  {endDate ? formatDate(endDate) : '日付を選択'}
+                </Text>
+                <Ionicons name="calendar-outline" size={20} color={Colors.deepNeuroBlue} />
+              </Pressable>
+              {showEndDatePicker && (
+                <DateTimePicker
+                  value={endDate || new Date()}
+                  mode="date"
+                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                  onChange={handleEndDateChange}
+                  minimumDate={startDate || undefined}
+                />
+              )}
             </ScrollView>
 
             <View style={styles.modalFooter}>
@@ -466,30 +519,33 @@ const styles = StyleSheet.create({
     color: Colors.deepInkBrown,
     backgroundColor: Colors.pureWhite,
   },
-  timingGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  timingBtn: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
+  pickerContainer: {
     borderWidth: 1,
     borderColor: '#DDE3EE',
+    borderRadius: 8,
+    overflow: 'hidden',
     backgroundColor: Colors.pureWhite,
   },
-  timingBtnActive: {
-    backgroundColor: Colors.deepNeuroBlue,
-    borderColor: Colors.deepNeuroBlue,
+  picker: {
+    height: Platform.OS === 'ios' ? 200 : 50,
   },
-  timingBtnText: {
-    fontSize: 13,
+  datePickerButton: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#DDE3EE',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    backgroundColor: Colors.pureWhite,
+  },
+  datePickerText: {
+    fontSize: 16,
     color: Colors.deepInkBrown,
   },
-  timingBtnTextActive: {
-    color: Colors.pureWhite,
-    fontWeight: '600',
+  datePickerPlaceholder: {
+    color: Colors.grayBlue,
   },
   modalFooter: {
     flexDirection: 'row',

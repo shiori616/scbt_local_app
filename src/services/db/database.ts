@@ -138,9 +138,7 @@ export const INTAKE_TIMINGS = [
   { id: 9, key: 'evening_after_meal', label: '夕食後' },
   { id: 10, key: 'bedtime', label: '就寝前' },
   { id: 11, key: 'between_meals', label: '食間' },
-  { id: 12, key: 'as_needed', label: '頓服' },
-  { id: 13, key: 'multiple_times', label: '1日数回' },
-  { id: 14, key: 'fixed_time', label: '時刻指定' },
+  { id: 12, key: 'as_needed', label: '頓服' }
 ] as const;
 
 export type Medication = {
